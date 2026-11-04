@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<title>docker-android</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0a0a;
+    --surface: #161616;
+    --surface-hover: #222;
+    --line: #262626;
+    --text: #ededed;
+    --muted: #8a8a8a;
+    --live: #4ade80;
+    --wait: #facc15;
+    --chrome: 168px;
+    --gutter: 24px;
+    --ar: 0.4737;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+  body {
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 100dvh;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    padding: 16px var(--gutter) 0;
+    font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted);
+  }
+  main {
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 0 var(--gutter) max(20px, env(safe-area-inset-bottom));
+    min-height: 0;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--wait);
+  }
+  .state::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .state.live { color: var(--live); }
+  .device {
+    --screen-h: min(calc((100dvh - var(--chrome)) / 1.036), calc((100vw - 2 * var(--gutter)) / (var(--ar) + 0.036)), 1100px);
+    --bezel: calc(var(--screen-h) * 0.018);
+    padding: var(--bezel);
+    border-radius: calc(var(--bezel) * 3);
+    background: #000;
+    box-shadow: 0 0 0 1px #2e2e2e, 0 0 0 calc(var(--bezel) * 0.35) #111, 0 24px 80px rgba(0, 0, 0, 0.6);
+  }
+  .screen {
+    position: relative;
+    display: block;
+    height: var(--screen-h);
+    aspect-ratio: var(--ar);
+    border-radius: calc(var(--bezel) * 1.8);
+    overflow: hidden;
+    background: #050505;
+    outline: none;
+    touch-action: none;
+    cursor: default;
+  }
+  .screen canvas { width: 100%; height: 100%; display: block; }
+  .toolbar { display: flex; gap: 10px; }
+  .group {
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  button {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    transition: background-color 120ms ease, transform 120ms ease;
+  }
+  button:hover { background: var(--surface-hover); }
+  button:active { transform: scale(0.92); }
+  button:focus-visible { outline: 2px solid #555; outline-offset: -2px; }
+  svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  @media (max-width: 520px) {
+    :root { --gutter: 12px; --chrome: 132px; }
+    header { display: none; }
+    main { gap: 12px; padding-top: max(12px, env(safe-area-inset-top)); }
+    .badge { height: 28px; font-size: 13px; }
+    .toolbar { gap: 6px; }
+    button { width: 36px; height: 36px; }
+  }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+</style>
+</head>
+<body>
+<header>docker-android</header>
+<main>
+  <div class="badge"><span id="label">Android</span><span id="state" class="state">connecting</span></div>
+  <div class="device">
+    <div id="screen" class="screen" tabindex="0" aria-label="Device screen"><canvas id="canvas"></canvas></div>
+  </div>
+  <nav class="toolbar">
+    <div class="group">
+      <button data-key="GoBack" aria-label="Back" title="Back"><svg viewBox="0 0 24 24"><path d="M16 5v14L6 12z"/></svg></button>
+      <button data-key="GoHome" aria-label="Home" title="Home"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg></button>
+      <button data-key="AppSwitch" aria-label="Recent apps" title="Recent apps"><svg viewBox="0 0 24 24"><rect x="5.5" y="5.5" width="13" height="13" rx="2"/></svg></button>
+    </div>
+    <div class="group">
+      <button data-key="AudioVolumeDown" aria-label="Volume down" title="Volume down"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/></svg></button>
+      <button data-key="AudioVolumeUp" aria-label="Volume up" title="Volume up"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5"/><path d="M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg></button>
+      <button id="rotate" aria-label="Rotate" title="Rotate"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+      <button id="shot" aria-label="Screenshot" title="Screenshot"><svg viewBox="0 0 24 24"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+      <button data-key="Power" aria-label="Power" title="Power"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg></button>
+    </div>
+  </nav>
+</main>
+<script>
+  const screen = document.getElementById("screen");
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const state = document.getElementById("state");
+  let ws, retry = 0, pending = null, decoding = false;
+
+  function setState(live) {
+    state.textContent = live ? "live" : "connecting";
+    state.classList.toggle("live", live);
+  }
+
+  function setShape(w, h) {
+    document.documentElement.style.setProperty("--ar", (w / h).toFixed(4));
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  async function draw() {
+    if (decoding || !pending) return;
+    decoding = true;
+    const blob = pending;
+    pending = null;
+    try {
+      const bitmap = await createImageBitmap(blob);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+    } finally {
+      decoding = false;
+      if (pending) draw();
+    }
+  }
+
+  function connect() {
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${location.pathname.replace(/\/$/, "")}/ws`);
+    ws.binaryType = "blob";
+    ws.onopen = () => { retry = 0; };
+    ws.onmessage = (e) => {
+      if (typeof e.data === "string") {
+        const m = JSON.parse(e.data);
+        if (m.t === "frame") setShape(m.w, m.h);
+        return;
+      }
+      setState(true);
+      pending = e.data;
+      draw();
+    };
+    ws.onclose = () => {
+      setState(false);
+      setTimeout(connect, Math.min(4000, 250 * 2 ** retry++));
+    };
+  }
+
+  function send(msg) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  function point(e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+    };
+  }
+
+  let pointerId = null, moveQueued = null;
+  screen.addEventListener("pointerdown", (e) => {
+    if (pointerId !== null) return;
+    pointerId = e.pointerId;
+    screen.setPointerCapture(e.pointerId);
+    screen.focus({ preventScroll: true });
+    send({ t: "touch", down: true, ...point(e) });
+  });
+  screen.addEventListener("pointermove", (e) => {
+    if (e.pointerId !== pointerId) return;
+    if (!moveQueued) requestAnimationFrame(() => { send({ t: "touch", down: true, ...moveQueued }); moveQueued = null; });
+    moveQueued = point(e);
+  });
+  const release = (e) => {
+    if (e.pointerId !== pointerId) return;
+    pointerId = null;
+    moveQueued = null;
+    send({ t: "touch", down: false, ...point(e) });
+  };
+  screen.addEventListener("pointerup", release);
+  screen.addEventListener("pointercancel", release);
+  screen.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  const specialKeys = new Set(["Backspace", "Enter", "Tab", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+  screen.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey) return;
+    if (e.key === "Escape") send({ t: "key", key: "GoBack" });
+    else if (specialKeys.has(e.key)) send({ t: "key", key: e.key });
+    else if (e.key.length === 1) send({ t: "text", text: e.key });
+    else return;
+    e.preventDefault();
+  });
+  screen.addEventListener("paste", (e) => {
+    const text = e.clipboardData.getData("text");
+    if (text) send({ t: "text", text });
+  });
+
+  document.querySelectorAll("[data-key]").forEach((b) => b.addEventListener("click", () => send({ t: "key", key: b.dataset.key })));
+  document.getElementById("rotate").addEventListener("click", () => send({ t: "rotate" }));
+  document.getElementById("shot").addEventListener("click", () => {
+    const a = document.createElement("a");
+    a.href = "screenshot";
+    a.download = `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+    a.click();
+  });
+
+  fetch("info").then((r) => r.json()).then((i) => {
+    document.getElementById("label").textContent = i.label;
+    setShape(i.width, i.height);
+  }).finally(connect);
+</script>
+</body>
+</html>
