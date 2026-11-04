@@ -5,6 +5,7 @@ import asyncio
 import glob
 import io
 import json
+import logging
 import os
 import sys
 
@@ -21,6 +22,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_EDGE = int(os.environ.get("WEB_UI_MAX_EDGE", "1280"))
 JPEG_QUALITY = int(os.environ.get("WEB_UI_JPEG_QUALITY", "80"))
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logger = logging.getLogger("web_ui")
+
 
 def discover_token() -> str:
     token = os.environ.get("EMULATOR_GRPC_TOKEN")
@@ -35,29 +39,45 @@ def discover_token() -> str:
     return ""
 
 
+def to_panel(x: float, y: float, rotation: int):
+    """Map a point on the rotated frame to the unrotated panel, both normalized to 0..1."""
+    return {0: (x, y), 1: (1 - y, x), 2: (1 - x, 1 - y), 3: (y, 1 - x)}[rotation]
+
+
 class Emulator:
-    def __init__(self, address: str, token: str, label: str) -> None:
-        self.channel = grpc.aio.insecure_channel(
-            address, options=[("grpc.max_receive_message_length", 64 << 20)])
-        self.stub = rpc.EmulatorControllerStub(self.channel)
-        self.md = [("authorization", f"Bearer {token}")] if token else []
-        self.label = label
+    def __init__(self, address: str, label: str) -> None:
+        self.address = address
+        self.label = label or "Android Emulator"
+        self.channel = None
+        self.stub = None
+        self.md = []
         self.lcd = (1080, 1920)
+        self.rotation = 0
         self.frame = None
         self.frame_seq = 0
         self.frame_ready = asyncio.Condition()
-        self.rotation = 0
+        self.connected = asyncio.Event()
 
-    async def load_status(self) -> None:
-        status = await self.stub.getStatus(empty_pb2.Empty(), metadata=self.md)
-        cfg = {e.key: e.value for e in status.hardwareConfig.entry}
-        self.lcd = (int(cfg.get("hw.lcd.width", 1080)), int(cfg.get("hw.lcd.height", 1920)))
-        if not self.label:
-            self.label = cfg.get("avd.name", "Android Emulator").replace("_", " ")
-
-    def stream_size(self):
-        edge = min(MAX_EDGE, max(self.lcd))
-        return edge, edge
+    async def connect(self) -> None:
+        self.connected.clear()
+        while True:
+            token = discover_token()
+            if self.channel:
+                await self.channel.close()
+            self.channel = grpc.aio.insecure_channel(
+                self.address, options=[("grpc.max_receive_message_length", 64 << 20)])
+            self.stub = rpc.EmulatorControllerStub(self.channel)
+            self.md = [("authorization", f"Bearer {token}")] if token else []
+            try:
+                status = await self.stub.getStatus(empty_pb2.Empty(), metadata=self.md, timeout=5)
+                cfg = {e.key: e.value for e in status.hardwareConfig.entry}
+                self.lcd = (int(cfg.get("hw.lcd.width", 1080)), int(cfg.get("hw.lcd.height", 1920)))
+                logger.info(f"connected to emulator at {self.address}, panel {self.lcd[0]}x{self.lcd[1]}")
+                self.connected.set()
+                return
+            except grpc.aio.AioRpcError as e:
+                logger.info(f"waiting for emulator gRPC ({e.code().name})")
+                await asyncio.sleep(2)
 
     @staticmethod
     def encode(img: "pb.Image") -> bytes:
@@ -69,9 +89,10 @@ class Emulator:
     async def pump_frames(self) -> None:
         loop = asyncio.get_running_loop()
         while True:
+            await self.connect()
+            edge = min(MAX_EDGE, max(self.lcd))
+            fmt = pb.ImageFormat(format=pb.ImageFormat.RGB888, width=edge, height=edge)
             try:
-                w, h = self.stream_size()
-                fmt = pb.ImageFormat(format=pb.ImageFormat.RGB888, width=w, height=h)
                 async for img in self.stub.streamScreenshot(fmt, metadata=self.md):
                     jpeg = await loop.run_in_executor(None, self.encode, img)
                     async with self.frame_ready:
@@ -80,30 +101,36 @@ class Emulator:
                         self.frame_seq += 1
                         self.frame_ready.notify_all()
             except grpc.aio.AioRpcError as e:
-                print(f"screen stream interrupted: {e.code()}", file=sys.stderr)
-                await asyncio.sleep(1)
+                logger.warning(f"screen stream interrupted: {e.code().name}")
+            await asyncio.sleep(1)
+
+    async def call(self, method: str, request) -> None:
+        if not self.connected.is_set():
+            return
+        try:
+            await getattr(self.stub, method)(request, metadata=self.md, timeout=5)
+        except grpc.aio.AioRpcError as e:
+            logger.warning(f"{method} failed: {e.code().name}")
 
     async def touch(self, x: float, y: float, down: bool) -> None:
         w, h = self.lcd
-        # Frames arrive rotated; touches are in the unrotated panel's coordinates.
-        x, y = {0: (x, y), 1: (1 - y, x), 2: (1 - x, 1 - y), 3: (y, 1 - x)}[self.rotation]
-        touch = pb.Touch(x=round(x * (w - 1)), y=round(y * (h - 1)), identifier=1, pressure=1 if down else 0)
-        await self.stub.sendTouch(pb.TouchEvent(touches=[touch]), metadata=self.md)
+        px, py = to_panel(x, y, self.rotation)
+        touch = pb.Touch(x=round(px * (w - 1)), y=round(py * (h - 1)), identifier=1, pressure=1 if down else 0)
+        await self.call("sendTouch", pb.TouchEvent(touches=[touch]))
 
     async def key(self, key: str) -> None:
-        await self.stub.sendKey(pb.KeyboardEvent(eventType=pb.KeyboardEvent.keypress, key=key), metadata=self.md)
+        await self.call("sendKey", pb.KeyboardEvent(eventType=pb.KeyboardEvent.keypress, key=key))
 
     async def text(self, text: str) -> None:
-        await self.stub.sendKey(pb.KeyboardEvent(text=text), metadata=self.md)
+        await self.call("sendKey", pb.KeyboardEvent(text=text))
 
     async def rotate(self) -> None:
-        angles = {0: 90, 1: 180, 2: 270, 3: 0}
-        value = pb.PhysicalModelValue(target=pb.PhysicalModelValue.ROTATION,
-                                      value=pb.ParameterValue(data=[0, 0, angles[self.rotation]]))
-        await self.stub.setPhysicalModel(value, metadata=self.md)
+        angle = {0: 90, 1: 180, 2: 270, 3: 0}[self.rotation]
+        await self.call("setPhysicalModel", pb.PhysicalModelValue(
+            target=pb.PhysicalModelValue.ROTATION, value=pb.ParameterValue(data=[0, 0, angle])))
 
     async def screenshot(self) -> bytes:
-        img = await self.stub.getScreenshot(pb.ImageFormat(format=pb.ImageFormat.PNG), metadata=self.md)
+        img = await self.stub.getScreenshot(pb.ImageFormat(format=pb.ImageFormat.PNG), metadata=self.md, timeout=10)
         return img.image
 
 
@@ -118,7 +145,13 @@ async def info(request: web.Request) -> web.Response:
 
 
 async def screenshot(request: web.Request) -> web.Response:
-    png = await request.app["emu"].screenshot()
+    emu: Emulator = request.app["emu"]
+    if not emu.connected.is_set():
+        raise web.HTTPServiceUnavailable()
+    try:
+        png = await emu.screenshot()
+    except grpc.aio.AioRpcError:
+        raise web.HTTPServiceUnavailable()
     return web.Response(body=png, content_type="image/png")
 
 
@@ -143,26 +176,27 @@ async def socket(request: web.Request) -> web.WebSocketResponse:
         async for msg in ws:
             if msg.type != WSMsgType.TEXT:
                 continue
-            m = json.loads(msg.data)
-            kind = m.get("t")
-            if kind == "touch":
-                await emu.touch(float(m["x"]), float(m["y"]), bool(m["down"]))
-            elif kind == "key":
-                await emu.key(str(m["key"]))
-            elif kind == "text":
-                await emu.text(str(m["text"]))
-            elif kind == "rotate":
-                await emu.rotate()
+            try:
+                m = json.loads(msg.data)
+                kind = m.get("t")
+                if kind == "touch":
+                    await emu.touch(float(m["x"]), float(m["y"]), bool(m["down"]))
+                elif kind == "key":
+                    await emu.key(str(m["key"]))
+                elif kind == "text":
+                    await emu.text(str(m["text"]))
+                elif kind == "rotate":
+                    await emu.rotate()
+            except (ValueError, KeyError, TypeError, AttributeError) as e:
+                logger.warning(f"ignored malformed message: {e}")
     finally:
         sender.cancel()
     return ws
 
 
 async def start_background(app: web.Application) -> None:
-    emu = Emulator(*app["emu_args"])
-    app["emu"] = emu
-    await emu.load_status()
-    app["pump"] = asyncio.create_task(emu.pump_frames())
+    app["emu"] = Emulator(*app["emu_args"])
+    app["pump"] = asyncio.create_task(app["emu"].pump_frames())
 
 
 def main() -> None:
@@ -174,7 +208,7 @@ def main() -> None:
     args = parser.parse_args()
 
     app = web.Application()
-    app["emu_args"] = (args.grpc, discover_token(), args.label)
+    app["emu_args"] = (args.grpc, args.label)
     app.on_startup.append(start_background)
     app.add_routes([web.get("/", index), web.get("/info", info),
                     web.get("/screenshot", screenshot), web.get("/ws", socket)])

@@ -13,6 +13,7 @@ class Application:
         PORT_FORWARDER = "port_forwarder"
         VNC_SERVER = "vnc_server"
         VNC_WEB = "vnc_web"
+        WEB_UI = "web_ui"
 
     def __init__(self, name: str, command: str, additional_args: str = "", ui: bool = False) -> None:
         self.logger = logging.getLogger(self.__class__.__name__)

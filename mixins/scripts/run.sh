@@ -14,6 +14,9 @@ function shuwdown(){
 trap shuwdown SIGTERM
 
 SUPERVISORD_CONFIG_PATH="${APP_PATH}/mixins/configs/process"
+if [[ ${DEVICE_TYPE} == "emulator" && ${WEB_UI} == true ]]; then
+  /usr/bin/supervisord --configuration ${SUPERVISORD_CONFIG_PATH}/supervisord-web.conf &
+fi
 if [[ ${DEVICE_TYPE} == "geny_"* ]]; then
   /usr/bin/supervisord --configuration ${SUPERVISORD_CONFIG_PATH}/supervisord-base.conf & \
   wait

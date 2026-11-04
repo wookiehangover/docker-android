@@ -26,9 +26,12 @@ RUN yes | sdkmanager --licenses \
 #   VNC server
 # xterm
 #   Terminal emulator
+# python3-venv
+#   Virtual environments for the CLI and web UI
 #==================
 RUN apt-get -qqy update && apt-get -qqy install --no-install-recommends \
     feh \
+    python3-venv \
     x11vnc \
     xterm \
  && apt autoremove -y \
@@ -73,6 +76,22 @@ COPY cli ${APP_PATH}/cli
 RUN --mount=type=secret,id=extension,dst=/tmp/extension.sh \
     bash /tmp/extension.sh
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+#========
+# Web UI
+#--------
+# Browser UI that talks to the emulator over its gRPC API.
+# Enable with WEB_UI=true; pair with EMULATOR_HEADLESS=true to skip the X/VNC stack.
+#========
+ENV WEB_UI=false \
+    WEB_UI_PORT=6090 \
+    EMULATOR_PROTO_PATH=/opt/web-ui/proto
+RUN python3 -m venv /opt/web-ui \
+ && /opt/web-ui/bin/pip install --no-cache-dir -r ${APP_PATH}/mixins/web-ui/requirements.txt \
+ && mkdir -p ${EMULATOR_PROTO_PATH} \
+ && /opt/web-ui/bin/python -m grpc_tools.protoc -I ${ANDROID_HOME}/emulator/lib \
+    --python_out=${EMULATOR_PROTO_PATH} --grpc_python_out=${EMULATOR_PROTO_PATH} emulator_controller.proto
+EXPOSE 6090
 
 #===================
 # Configure OpenBox

@@ -180,6 +180,8 @@ class Emulator(Device):
         basic_cmd = "emulator @{n}".format(n=self.name)
         basic_args = "-gpu swiftshader_indirect -accel on -writable-system -verbose"
         wipe_arg = "-wipe-data" if not self.is_initialized() else ""
+        if convert_str_to_bool(os.getenv(ENV.EMULATOR_HEADLESS)) and "-no-window" not in self.additional_args:
+            basic_args += " -no-window"
 
         start_cmd = f"{basic_cmd} {basic_args} {wipe_arg} {self.additional_args}"
         self.logger.info(f"Command to run {self.device_type}: '{start_cmd}'")

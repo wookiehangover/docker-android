@@ -1,3 +1,4 @@
+import os
 import mock
 
 from device.emulator import Emulator
@@ -74,6 +75,18 @@ class TestEmulator(BaseDeviceTest):
             "emulator", "@my_emu", "-gpu", "swiftshader_indirect", "-accel", "on",
             "-writable-system", "-verbose", "-turncfg", "cat /tmp/turn.cfg"
         ])
+
+    def test_deploy_headless_adds_no_window_once(self):
+        for additional_args, expected_tail in (("", ["-no-window"]), ("-no-window", ["-no-window"])):
+            self.emu.additional_args = additional_args
+            with mock.patch.dict(os.environ, {"EMULATOR_HEADLESS": "true"}), \
+                    mock.patch.object(self.emu, "is_initialized", return_value=True), \
+                    mock.patch("subprocess.Popen") as popen:
+                self.emu.deploy()
+
+            args = popen.call_args[0][0]
+            self.assertEqual(args.count("-no-window"), 1)
+            self.assertEqual(args[-1:], expected_tail)
 
     def test_use_override_config_no_env(self):
         with mock.patch("os.getenv", return_value=None):

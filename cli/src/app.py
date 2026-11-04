@@ -134,6 +134,16 @@ def start_vnc_web() -> None:
         logger.info("env WEB_VNC cannot be found, VNC_WEB is not started!")
 
 
+def start_web_ui() -> None:
+    if convert_str_to_bool(os.getenv(ENV.WEB_UI)):
+        port = os.getenv(ENV.WEB_UI_PORT, "6090")
+        server = os.path.join(get_env_value_or_raise(ENV.APP_PATH), "mixins", "web-ui", "server.py")
+        web_ui = Application("web_ui", "/opt/web-ui/bin/python", f"{server} --port {port}", False)
+        web_ui.start()
+    else:
+        logger.info("env WEB_UI cannot be found, WEB_UI is not started!")
+
+
 @cli.command()
 @click.argument("app", type=click.Choice([app.value for app in Application.App]))
 def start(app):
@@ -152,6 +162,8 @@ def start(app):
         start_vnc_server()
     elif selected_app == Application.App.VNC_WEB.value.lower():
         start_vnc_web()
+    elif selected_app == Application.App.WEB_UI.value.lower():
+        start_web_ui()
     else:
         logger.error(f"application '{selected_app}' is not supported!")
 
