@@ -26,12 +26,19 @@ RUN yes | sdkmanager --licenses \
 #   VNC server
 # xterm
 #   Terminal emulator
+# menu, openbox
+#   Window manager
 # python3-venv
 #   Virtual environments for the CLI and web UI
+# sudo
+#   KVM permission setup
 #==================
 RUN apt-get -qqy update && apt-get -qqy install --no-install-recommends \
     feh \
+    menu \
+    openbox \
     python3-venv \
+    sudo \
     x11vnc \
     xterm \
  && apt autoremove -y \
