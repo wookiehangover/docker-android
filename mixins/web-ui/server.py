@@ -412,7 +412,7 @@ async def get_foreground(emu: Emulator, body: dict, request: web.Request):
     out = await adb_shell(
         "set -- $(dumpsys activity activities 2>/dev/null "
         "| sed -nE 's/.*(mResumedActivity|topResumedActivity).* ([A-Za-z0-9_.]+)\\/.*/\\2/p'); "
-        "echo \"$1\"; [ -n \"$1\" ] && pidof \"$1\"", timeout=10)
+        "echo \"$1\"; [ -n \"$1\" ] && pidof \"$1\"; true", timeout=10)
     lines = out.splitlines()
     package = lines[0].strip() if lines else ""
     pids = [int(p) for p in (lines[1].split() if len(lines) > 1 else []) if p.isdigit()]
