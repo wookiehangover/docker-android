@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#0a0a0a">
 <title>docker-android</title>
 <style>
+  @property --panel-w { syntax: "<length>"; inherits: true; initial-value: 0px; }
   :root {
     color-scheme: dark;
     --bg: #0a0a0a;
@@ -19,16 +20,25 @@
     --chrome: 168px;
     --gutter: 24px;
     --ar: 0.4737;
+    --panel: 340px;
+    --panel-w: 0px;
+    --danger: #f87171;
+    transition: --panel-w 220ms cubic-bezier(0.2, 0, 0, 1);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
   body {
     font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    display: grid;
-    grid-template-rows: auto 1fr;
-    min-height: 100dvh;
+    display: flex;
+    height: 100dvh;
     overflow: hidden;
     -webkit-tap-highlight-color: transparent;
+  }
+  .stage {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    grid-template-rows: auto 1fr;
   }
   header {
     display: flex;
@@ -75,7 +85,7 @@
   }
   .state.live { color: var(--live); }
   .device {
-    --screen-h: min(calc((100dvh - var(--chrome)) / 1.036), calc((100vw - 2 * var(--gutter)) / (var(--ar) + 0.036)), 1100px);
+    --screen-h: min(calc((100dvh - var(--chrome)) / 1.036), calc((100vw - var(--panel-w) - 2 * var(--gutter)) / (var(--ar) + 0.036)), 1100px);
     --bezel: calc(var(--screen-h) * 0.018);
     padding: var(--bezel);
     border-radius: calc(var(--bezel) * 3);
@@ -118,9 +128,175 @@
     transition: background-color 120ms ease, transform 120ms ease;
   }
   button:hover { background: var(--surface-hover); }
+  .panel-toggle {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    z-index: 3;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    color: var(--muted);
+  }
+  .panel-toggle:hover, .panel-toggle[aria-expanded="true"] { color: var(--text); }
+  .panel {
+    flex: none;
+    width: var(--panel);
+    margin-right: calc(var(--panel-w) - var(--panel));
+    height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: #101010;
+    border-left: 1px solid var(--line);
+    padding: 10px 20px max(24px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .panel[hidden] { display: flex; visibility: hidden; }
+  .scrim { display: none; }
+  section h2 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 28px;
+    margin: 0 0 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+  }
+  section:first-child h2 { min-height: 36px; padding-right: 44px; margin-bottom: 2px; }
+  section h2 button { width: 28px; height: 28px; margin-right: -6px; color: var(--muted); }
+  section h2 button:hover { color: var(--text); }
+  section h2 button svg { width: 16px; height: 16px; }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .row > span:first-child { color: var(--muted); }
+  .row > span:last-child { text-align: right; }
+  .field { position: relative; display: flex; gap: 8px; }
+  input[type="text"], input[type="number"], textarea {
+    width: 100%;
+    min-width: 0;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    outline: none;
+    transition: border-color 120ms ease;
+  }
+  textarea { height: auto; min-height: 76px; padding: 8px 10px; resize: vertical; line-height: 1.4; }
+  input:focus, textarea:focus { border-color: #4a4a4a; }
+  input::placeholder, textarea::placeholder { color: #5c5c5c; }
+  input[type="number"] { -moz-appearance: textfield; }
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+  .field .go {
+    position: absolute;
+    right: 3px;
+    top: 3px;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    color: var(--muted);
+  }
+  .field .go:hover { color: var(--text); }
+  .field .go svg { width: 16px; height: 16px; }
+  .field input:has(+ .go) { padding-right: 38px; }
+  .segmented {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+  }
+  .segmented button {
+    width: auto;
+    height: 30px;
+    border-radius: 7px;
+    color: var(--muted);
+    font: inherit;
+  }
+  .segmented button[aria-pressed="true"] { background: var(--surface-hover); color: var(--text); }
+  input[type="range"] { width: 100%; margin: 6px 0 4px; accent-color: var(--text); }
+  .switch {
+    appearance: none;
+    position: relative;
+    width: 34px;
+    height: 20px;
+    margin: 0;
+    border-radius: 999px;
+    background: #2a2a2a;
+    cursor: pointer;
+    transition: background-color 150ms ease;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text);
+    transition: transform 150ms ease;
+  }
+  .switch:checked { background: var(--live); }
+  .switch:checked::after { transform: translateX(14px); background: #0a0a0a; }
+  .switch:focus-visible { outline: 2px solid #555; outline-offset: 2px; }
+  .row:has(.switch) { align-items: center; }
+  .wide {
+    width: 100%;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font: inherit;
+  }
+  .wide.set { width: auto; flex: none; padding: 0 14px; }
+  .note { margin: 6px 0 0; font-size: 13px; color: var(--muted); min-height: 0; }
+  .note:empty { display: none; }
+  .note.error { color: var(--danger); }
+  .dropping .screen { box-shadow: 0 0 0 2px var(--live); }
   button:active { transform: scale(0.92); }
   button:focus-visible { outline: 2px solid #555; outline-offset: -2px; }
   svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  @media (min-width: 900px) {
+    .panel-open { --panel-w: var(--panel); }
+  }
+  @media (max-width: 899px) {
+    .panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      z-index: 2;
+      width: min(var(--panel), calc(100vw - 40px));
+      margin: 0;
+      transform: translateX(100%);
+      transition: transform 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s 220ms;
+      box-shadow: -24px 0 60px rgba(0, 0, 0, 0.5);
+    }
+    .panel-open .panel { transform: none; transition: transform 220ms cubic-bezier(0.2, 0, 0, 1); }
+    .scrim {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      background: rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 220ms ease;
+    }
+    .panel-open .scrim { opacity: 1; pointer-events: auto; }
+  }
   @media (max-width: 520px) {
     :root { --gutter: 12px; --chrome: 132px; }
     header { display: none; }
@@ -129,10 +305,13 @@
     .toolbar { gap: 6px; }
     button { width: 36px; height: 36px; }
   }
-  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    :root, button, .panel, .scrim, .switch, .switch::after { transition: none !important; }
+  }
 </style>
 </head>
 <body>
+<div class="stage">
 <header>docker-android</header>
 <main>
   <div class="badge"><span id="label">Android</span><span id="state" class="state">connecting</span></div>
@@ -154,19 +333,76 @@
     </div>
   </nav>
 </main>
+</div>
+<div class="scrim" id="scrim"></div>
+<button id="panel-toggle" class="panel-toggle" aria-label="Device panel" title="Device panel" aria-expanded="false" aria-controls="panel"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></svg></button>
+<aside id="panel" class="panel" aria-label="Device panel" hidden>
+  <section>
+    <h2>Device</h2>
+    <div class="row"><span>Model</span><span id="i-model">–</span></div>
+    <div class="row"><span>Android</span><span id="i-android">–</span></div>
+    <div class="row"><span>Display</span><span id="i-display">–</span></div>
+    <div class="row"><span>Memory</span><span id="i-memory">–</span></div>
+    <div class="row"><span>Emulator</span><span id="i-emulator">–</span></div>
+  </section>
+  <section>
+    <h2><label for="clip">Clipboard</label><button id="clip-copy" aria-label="Copy to this computer" title="Copy to this computer"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></svg></button></h2>
+    <textarea id="clip" rows="3" spellcheck="false" placeholder="Empty"></textarea>
+    <p class="note" id="clip-note"></p>
+  </section>
+  <section>
+    <h2><label for="url">Open URL</label></h2>
+    <form class="field" id="url-form">
+      <input id="url" type="text" inputmode="url" placeholder="https://example.com" autocomplete="off" spellcheck="false">
+      <button class="go" aria-label="Open" title="Open"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button>
+    </form>
+    <p class="note" id="url-note"></p>
+  </section>
+  <section>
+    <h2>Appearance</h2>
+    <div class="segmented" role="group" aria-label="Appearance">
+      <button data-dark="false" aria-pressed="false">Light</button>
+      <button data-dark="true" aria-pressed="false">Dark</button>
+    </div>
+    <p class="note" id="appearance-note"></p>
+  </section>
+  <section>
+    <h2><label for="battery">Battery</label><span id="battery-value"></span></h2>
+    <input id="battery" type="range" min="0" max="100" step="1" value="100">
+    <div class="row"><span><label for="charging">Charging</label></span><input id="charging" class="switch" type="checkbox"></div>
+    <p class="note" id="battery-note"></p>
+  </section>
+  <section>
+    <h2>Location</h2>
+    <form class="field" id="loc-form">
+      <input id="lat" type="number" step="any" placeholder="Latitude" aria-label="Latitude">
+      <input id="lng" type="number" step="any" placeholder="Longitude" aria-label="Longitude">
+      <button class="wide set">Set</button>
+    </form>
+    <p class="note" id="loc-note"></p>
+  </section>
+  <section>
+    <h2>Install app</h2>
+    <button class="wide" id="apk-pick">Choose APK…</button>
+    <input id="apk" type="file" accept=".apk,application/vnd.android.package-archive" hidden>
+    <p class="note" id="apk-note">Or drop an APK on the screen.</p>
+  </section>
+</aside>
 <script>
   const screen = document.getElementById("screen");
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
   const state = document.getElementById("state");
-  let ws, retry = 0, pending = null, decoding = false;
+  let ws, retry = 0, pending = null, decoding = false, shaped = false;
 
   function setState(live) {
     state.textContent = live ? "live" : "connecting";
     state.classList.toggle("live", live);
   }
 
-  function setShape(w, h) {
+  function setShape(w, h, fromFrame = true) {
+    if (!fromFrame && shaped) return;
+    shaped = shaped || fromFrame;
     document.documentElement.style.setProperty("--ar", (w / h).toFixed(4));
     canvas.width = w;
     canvas.height = h;
@@ -190,11 +426,12 @@
   function connect() {
     ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${location.pathname.replace(/\/$/, "")}/ws`);
     ws.binaryType = "blob";
-    ws.onopen = () => { retry = 0; };
+    ws.onopen = () => { retry = 0; loadInfo(); };
     ws.onmessage = (e) => {
       if (typeof e.data === "string") {
         const m = JSON.parse(e.data);
         if (m.t === "frame") setShape(m.w, m.h);
+        else if (m.t === "clipboard") receiveClipboard(m.text);
         return;
       }
       setState(true);
@@ -265,10 +502,173 @@
     a.click();
   });
 
-  fetch("info").then((r) => r.json()).then((i) => {
-    document.getElementById("label").textContent = i.label;
-    setShape(i.width, i.height);
-  }).finally(connect);
+  const $ = (id) => document.getElementById(id);
+
+  function note(id, text, error = false) {
+    $(id).textContent = text || "";
+    $(id).classList.toggle("error", error);
+  }
+
+  async function post(path, body, noteId) {
+    try {
+      const r = await fetch(path, {
+        method: "POST",
+        headers: body instanceof Blob ? { "Content-Type": "application/vnd.android.package-archive" } : { "Content-Type": "application/json" },
+        body: body instanceof Blob ? body : JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error);
+      if (noteId) note(noteId, "");
+      return data;
+    } catch (err) {
+      if (noteId) note(noteId, err.message || "Request failed", true);
+      return null;
+    }
+  }
+
+  async function loadInfo() {
+    try {
+      const i = await (await fetch("info")).json();
+      $("label").textContent = i.label;
+      setShape(i.width, i.height, false);
+      $("i-model").textContent = i.label;
+      $("i-android").textContent = i.android ? `${i.android} (API ${i.api})` : "–";
+      $("i-display").textContent = `${i.width} × ${i.height}${i.density ? ` · ${i.density} dpi` : ""}`;
+      $("i-memory").textContent = i.ram ? `${(i.ram / 1024).toFixed(i.ram % 1024 ? 1 : 0)} GB · ${i.cores} cores` : "–";
+      $("i-emulator").textContent = i.emulator || "–";
+    } catch {}
+  }
+
+  async function loadState() {
+    try {
+      const st = await (await fetch("api/state")).json();
+      if (!st.ok) return;
+      if (st.dark !== null) setAppearance(st.dark);
+      if (st.battery) {
+        $("battery").value = st.battery.level;
+        $("charging").checked = st.battery.charging;
+        showBattery();
+      }
+      if (st.location && document.activeElement !== $("lat") && document.activeElement !== $("lng")) {
+        $("lat").value = +st.location.lat.toFixed(6);
+        $("lng").value = +st.location.lng.toFixed(6);
+      }
+      receiveClipboard(st.clipboard);
+    } catch {}
+  }
+
+  const root = document.documentElement;
+  const panel = $("panel");
+  const toggle = $("panel-toggle");
+  function setPanel(open, save = true) {
+    root.classList.toggle("panel-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    if (open) {
+      panel.hidden = false;
+      loadState();
+    } else {
+      const delay = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 240;
+      setTimeout(() => { if (!root.classList.contains("panel-open")) panel.hidden = true; }, delay);
+    }
+    if (save) localStorage.setItem("panel", open ? "1" : "0");
+  }
+  toggle.addEventListener("click", () => setPanel(!root.classList.contains("panel-open")));
+  $("scrim").addEventListener("click", () => setPanel(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && root.classList.contains("panel-open") && matchMedia("(max-width: 899px)").matches) setPanel(false);
+  });
+  setPanel(localStorage.getItem("panel") === "1" || (localStorage.getItem("panel") === null && matchMedia("(min-width: 1200px)").matches), false);
+
+  const clip = $("clip");
+  let clipTimer = null, clipPending = null;
+  function receiveClipboard(text) {
+    if (text === undefined || text === null) return;
+    if (document.activeElement === clip) clipPending = text;
+    else clip.value = text;
+  }
+  function pushClipboard() {
+    clearTimeout(clipTimer);
+    clipTimer = null;
+    post("api/clipboard", { text: clip.value }, "clip-note");
+  }
+  clip.addEventListener("input", () => {
+    clearTimeout(clipTimer);
+    clipTimer = setTimeout(pushClipboard, 400);
+  });
+  clip.addEventListener("blur", () => {
+    if (clipTimer) pushClipboard();
+    else if (clipPending !== null && clipPending !== clip.value) clip.value = clipPending;
+    clipPending = null;
+  });
+  $("clip-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(clip.value);
+    } catch {
+      clip.select();
+      document.execCommand("copy");
+      clip.setSelectionRange(clip.value.length, clip.value.length);
+    }
+    note("clip-note", "Copied to this computer");
+    setTimeout(() => { if ($("clip-note").textContent === "Copied to this computer") note("clip-note", ""); }, 1500);
+  });
+
+  $("url-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if ($("url").value.trim()) await post("api/open-url", { url: $("url").value }, "url-note");
+  });
+
+  function setAppearance(dark) {
+    document.querySelectorAll("[data-dark]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.dark === String(dark))));
+  }
+  document.querySelectorAll("[data-dark]").forEach((b) => b.addEventListener("click", async () => {
+    const dark = b.dataset.dark === "true";
+    setAppearance(dark);
+    if (!(await post("api/appearance", { dark }, "appearance-note"))) setAppearance(!dark);
+  }));
+
+  function showBattery() { $("battery-value").textContent = `${$("battery").value}%`; }
+  const sendBattery = () => post("api/battery", { level: +$("battery").value, charging: $("charging").checked }, "battery-note");
+  $("battery").addEventListener("input", showBattery);
+  $("battery").addEventListener("change", sendBattery);
+  $("charging").addEventListener("change", sendBattery);
+
+  $("loc-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const lat = parseFloat($("lat").value), lng = parseFloat($("lng").value);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return note("loc-note", "Enter a latitude and longitude", true);
+    if (await post("api/location", { lat, lng }, "loc-note")) note("loc-note", "Location set");
+  });
+
+  async function install(file) {
+    if (!file) return;
+    if (!/\.apk$/i.test(file.name)) return note("apk-note", "Choose an .apk file", true);
+    $("apk-pick").disabled = true;
+    note("apk-note", `Installing ${file.name}…`);
+    const r = await post("api/install", file, "apk-note");
+    if (r) note("apk-note", r.package ? `Installed and opened ${r.package}` : `Installed ${file.name}`);
+    $("apk-pick").disabled = false;
+    $("apk").value = "";
+  }
+  $("apk-pick").addEventListener("click", () => $("apk").click());
+  $("apk").addEventListener("change", () => install($("apk").files[0]));
+  let dragDepth = 0;
+  window.addEventListener("dragenter", (e) => {
+    if (![...e.dataTransfer.types].includes("Files")) return;
+    e.preventDefault();
+    dragDepth++;
+    document.body.classList.add("dropping");
+  });
+  window.addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
+  window.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dropping"); } });
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    document.body.classList.remove("dropping");
+    if (!root.classList.contains("panel-open")) setPanel(true);
+    install(e.dataTransfer.files[0]);
+  });
+
+  loadInfo().finally(connect);
 </script>
 </body>
 </html>
