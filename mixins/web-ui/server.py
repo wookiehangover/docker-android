@@ -7,9 +7,11 @@ import io
 import json
 import logging
 import os
+import re
 import shlex
 import sys
 import tempfile
+from collections import deque
 
 import grpc
 from aiohttp import web, WSMsgType
@@ -63,6 +65,84 @@ async def adb(*args: str, timeout: float = 30) -> str:
 
 async def adb_shell(command: str, timeout: float = 30) -> str:
     return await adb("shell", command, timeout=timeout)
+
+
+LOGCAT_LINE = re.compile(
+    r"^(\d\d-\d\d \d\d:\d\d:\d\d\.\d+)\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+(.*?)\s*: (.*)$")
+
+
+def parse_logcat(line: str):
+    """Parse one `logcat -v threadtime` line into [time, pid, tid, level, tag, message]."""
+    m = LOGCAT_LINE.match(line)
+    if not m:
+        return None
+    time, pid, tid, level, tag, msg = m.groups()
+    return [time[6:], int(pid), int(tid), level, tag, msg]
+
+
+class Logcat:
+    """One shared `adb logcat` follower with a ring buffer, active while anyone watches."""
+
+    def __init__(self, size: int = 2000) -> None:
+        self.ring = deque(maxlen=size)
+        self.sockets = set()
+        self.task = None
+        self.proc = None
+
+    async def subscribe(self, ws: web.WebSocketResponse) -> None:
+        self.sockets.add(ws)
+        if self.ring and self.task and not self.task.done():
+            await ws.send_str(json.dumps({"t": "lines", "lines": list(self.ring)}))
+        if not self.task or self.task.done():
+            self.task = asyncio.create_task(self.run())
+
+    def unsubscribe(self, ws: web.WebSocketResponse) -> None:
+        self.sockets.discard(ws)
+        if not self.sockets and self.task:
+            self.task.cancel()
+
+    async def run(self) -> None:
+        self.ring.clear()
+        tail = "500"
+        try:
+            while self.sockets:
+                self.proc = await asyncio.create_subprocess_exec(
+                    "adb", "logcat", "-v", "threadtime", "-T", tail,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                batch = []
+                flush = asyncio.create_task(self.flush_loop(batch))
+                try:
+                    async for raw in self.proc.stdout:
+                        entry = parse_logcat(raw.decode(errors="replace").rstrip("\r\n"))
+                        if entry:
+                            batch.append(entry)
+                finally:
+                    flush.cancel()
+                    await self.send(batch)
+                tail = "1"
+                await asyncio.sleep(1)
+        finally:
+            if self.proc and self.proc.returncode is None:
+                self.proc.kill()
+
+    async def flush_loop(self, batch: list) -> None:
+        while True:
+            await asyncio.sleep(0.1)
+            if batch:
+                lines = batch[:]
+                batch.clear()
+                await self.send(lines)
+
+    async def send(self, lines: list) -> None:
+        if not lines:
+            return
+        self.ring.extend(lines)
+        data = json.dumps({"t": "lines", "lines": lines})
+        for ws in list(self.sockets):
+            try:
+                await ws.send_str(data)
+            except (ConnectionResetError, RuntimeError):
+                self.sockets.discard(ws)
 
 
 class Emulator:
@@ -327,6 +407,31 @@ async def post_install(emu: Emulator, body: dict, request: web.Request):
     return {"package": package}
 
 
+@api
+async def get_foreground(emu: Emulator, body: dict, request: web.Request):
+    out = await adb_shell(
+        "set -- $(dumpsys activity activities 2>/dev/null "
+        "| sed -nE 's/.*(mResumedActivity|topResumedActivity).* ([A-Za-z0-9_.]+)\\/.*/\\2/p'); "
+        "echo \"$1\"; [ -n \"$1\" ] && pidof \"$1\"", timeout=10)
+    lines = out.splitlines()
+    package = lines[0].strip() if lines else ""
+    pids = [int(p) for p in (lines[1].split() if len(lines) > 1 else []) if p.isdigit()]
+    return {"package": package or None, "pids": pids}
+
+
+async def logcat_socket(request: web.Request) -> web.WebSocketResponse:
+    hub: Logcat = request.app["logcat"]
+    ws = web.WebSocketResponse(heartbeat=20)
+    await ws.prepare(request)
+    await hub.subscribe(ws)
+    try:
+        async for _ in ws:
+            pass
+    finally:
+        hub.unsubscribe(ws)
+    return ws
+
+
 async def socket(request: web.Request) -> web.WebSocketResponse:
     emu: Emulator = request.app["emu"]
     ws = web.WebSocketResponse(heartbeat=20)
@@ -373,6 +478,7 @@ async def socket(request: web.Request) -> web.WebSocketResponse:
 async def start_background(app: web.Application) -> None:
     emu = Emulator(*app["emu_args"])
     app["emu"] = emu
+    app["logcat"] = Logcat()
     app["tasks"] = [asyncio.create_task(emu.pump_frames()), asyncio.create_task(emu.pump_clipboard())]
 
 
@@ -389,7 +495,8 @@ def main() -> None:
     app.on_startup.append(start_background)
     app.add_routes([
         web.get("/", index), web.get("/info", info), web.get("/screenshot", screenshot), web.get("/ws", socket),
-        web.get("/api/state", get_state),
+        web.get("/api/state", get_state), web.get("/api/foreground", get_foreground),
+        web.get("/logcat", logcat_socket),
         web.post("/api/clipboard", post_clipboard), web.post("/api/open-url", post_open_url),
         web.post("/api/appearance", post_appearance), web.post("/api/battery", post_battery),
         web.post("/api/location", post_location), web.post("/api/install", post_install),

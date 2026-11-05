@@ -151,9 +151,59 @@
     padding: 10px 20px max(24px, env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
   }
   .panel[hidden] { display: flex; visibility: hidden; }
+  .panel-tabs { flex: none; margin-right: 44px; }
+  .tab { display: flex; flex-direction: column; gap: 24px; }
+  .tab[hidden] { display: none; }
+  .log-open { --panel: min(620px, 46vw); }
+  .log-open .panel { overflow: hidden; }
+  #tab-logcat { flex: 1; min-height: 0; gap: 10px; }
+  .log-tools { display: flex; gap: 8px; }
+  .log-tools input { flex: 1; }
+  .log-tools select {
+    flex: none;
+    height: 36px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+  }
+  .log-tools button {
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    color: var(--muted);
+  }
+  .log-tools button:hover, .log-tools button[aria-pressed="true"] { color: var(--text); }
+  .log-tools button svg { width: 18px; height: 18px; }
+  .log-app { color: var(--muted); }
+  .log {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    margin: 0 -20px;
+    padding: 6px 20px 12px;
+    border-top: 1px solid var(--line);
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .log div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1px 0 1px 2ch; text-indent: -2ch; }
+  .log div:hover { background: #161616; }
+  .log .ts { color: #5c5c5c; }
+  .log .lv { font-weight: 600; }
+  .log .tag { color: #b5b5b5; }
+  .log .V .lv, .log .V .msg { color: #6b6b6b; }
+  .log .D .lv, .log .D .msg { color: #9a9a9a; }
+  .log .I .lv { color: var(--live); }
+  .log .W .lv, .log .W .msg { color: var(--wait); }
+  .log .E .lv, .log .E .msg, .log .F .lv, .log .F .msg, .log .A .lv, .log .A .msg { color: var(--danger); }
+  .log-empty { margin: 24px 0; text-align: center; color: var(--muted); font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
   .scrim { display: none; }
   section h2 {
     display: flex;
@@ -165,7 +215,6 @@
     font-weight: 500;
     color: var(--muted);
   }
-  section:first-child h2 { min-height: 36px; padding-right: 44px; margin-bottom: 2px; }
   section h2 button { width: 28px; height: 28px; margin-right: -6px; color: var(--muted); }
   section h2 button:hover { color: var(--text); }
   section h2 button svg { width: 16px; height: 16px; }
@@ -285,6 +334,7 @@
       box-shadow: -24px 0 60px rgba(0, 0, 0, 0.5);
     }
     .panel-open .panel { transform: none; transition: transform 220ms cubic-bezier(0.2, 0, 0, 1); }
+    .log-open .panel { width: calc(100vw - 40px); }
     .scrim {
       display: block;
       position: fixed;
@@ -298,6 +348,7 @@
     .panel-open .scrim { opacity: 1; pointer-events: auto; }
   }
   @media (max-width: 520px) {
+    .log .ts { display: none; }
     :root { --gutter: 12px; --chrome: 132px; }
     header { display: none; }
     main { gap: 12px; padding-top: max(12px, env(safe-area-inset-top)); }
@@ -337,6 +388,11 @@
 <div class="scrim" id="scrim"></div>
 <button id="panel-toggle" class="panel-toggle" aria-label="Device panel" title="Device panel" aria-expanded="false" aria-controls="panel"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></svg></button>
 <aside id="panel" class="panel" aria-label="Device panel" hidden>
+  <div class="segmented panel-tabs" role="tablist" aria-label="Panel">
+    <button role="tab" data-tab="controls" aria-controls="tab-controls" aria-selected="true" aria-pressed="true">Controls</button>
+    <button role="tab" data-tab="logcat" aria-controls="tab-logcat" aria-selected="false" aria-pressed="false">Logcat</button>
+  </div>
+  <div class="tab" id="tab-controls" role="tabpanel">
   <section>
     <h2>Device</h2>
     <div class="row"><span>Model</span><span id="i-model">–</span></div>
@@ -387,6 +443,23 @@
     <input id="apk" type="file" accept=".apk,application/vnd.android.package-archive" hidden>
     <p class="note" id="apk-note">Or drop an APK on the screen.</p>
   </section>
+  </div>
+  <div class="tab" id="tab-logcat" role="tabpanel" hidden>
+    <div class="log-tools">
+      <input id="log-filter" type="text" placeholder="Filter" aria-label="Filter" spellcheck="false" autocomplete="off">
+      <select id="log-level" aria-label="Minimum level">
+        <option value="V">Verbose</option>
+        <option value="D">Debug</option>
+        <option value="I">Info</option>
+        <option value="W">Warn</option>
+        <option value="E">Error</option>
+      </select>
+      <button id="log-pause" aria-label="Pause" title="Pause" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg></button>
+      <button id="log-clear" aria-label="Clear" title="Clear"><svg viewBox="0 0 24 24"><path d="M5 7h14"/><path d="M10 11v6M14 11v6"/><path d="M6.5 7l.8 11a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9l.8-11"/><path d="M9.5 7V5.5a1.5 1.5 0 0 1 1.5-1.5h2a1.5 1.5 0 0 1 1.5 1.5V7"/></svg></button>
+    </div>
+    <div class="row"><span><label for="log-fg">Foreground app only</label> <span class="log-app" id="log-app"></span></span><input id="log-fg" class="switch" type="checkbox"></div>
+    <div class="log" id="log" role="log" aria-live="off" tabindex="0"></div>
+  </div>
 </aside>
 <script>
   const screen = document.getElementById("screen");
@@ -567,16 +640,145 @@
       panel.hidden = false;
       loadState();
     } else {
+      root.classList.remove("log-open");
       const delay = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 240;
       setTimeout(() => { if (!root.classList.contains("panel-open")) panel.hidden = true; }, delay);
     }
     if (save) localStorage.setItem("panel", open ? "1" : "0");
+    if (open) selectTab(localStorage.getItem("tab") || "controls", false);
+    syncLogcat();
   }
   toggle.addEventListener("click", () => setPanel(!root.classList.contains("panel-open")));
   $("scrim").addEventListener("click", () => setPanel(false));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && root.classList.contains("panel-open") && matchMedia("(max-width: 899px)").matches) setPanel(false);
   });
+  const LEVELS = "VDIWEFA";
+  const logEl = $("log");
+  let logs = [], logSocket = null, logRetry = 0, paused = false, fgPids = null, fgTimer = null;
+  let activeTab = "controls";
+
+  function selectTab(name, save = true) {
+    activeTab = name === "logcat" ? "logcat" : "controls";
+    document.querySelectorAll("[data-tab]").forEach((b) => {
+      const on = b.dataset.tab === activeTab;
+      b.setAttribute("aria-selected", String(on));
+      b.setAttribute("aria-pressed", String(on));
+    });
+    $("tab-controls").hidden = activeTab !== "controls";
+    $("tab-logcat").hidden = activeTab !== "logcat";
+    root.classList.toggle("log-open", activeTab === "logcat" && root.classList.contains("panel-open"));
+    if (save) localStorage.setItem("tab", activeTab);
+    syncLogcat();
+  }
+  document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => selectTab(b.dataset.tab)));
+
+  function logcatWanted() { return root.classList.contains("panel-open") && activeTab === "logcat"; }
+
+  function syncLogcat() {
+    if (logcatWanted() && !logSocket) openLogcat();
+    if (!logcatWanted() && logSocket) { const s = logSocket; logSocket = null; s.close(); }
+    pollForeground();
+  }
+
+  function openLogcat() {
+    const s = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${location.pathname.replace(/\/$/, "")}/logcat`);
+    logSocket = s;
+    s.onopen = () => { logRetry = 0; logs = []; renderLogs(); };
+    s.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.t === "lines") addLogs(m.lines);
+    };
+    s.onclose = () => {
+      if (logSocket !== s) return;
+      logSocket = null;
+      if (logcatWanted()) setTimeout(() => { if (logcatWanted() && !logSocket) openLogcat(); }, Math.min(4000, 250 * 2 ** logRetry++));
+    };
+  }
+
+  function matches(entry) {
+    const [, pid, , level, tag, msg] = entry;
+    if (LEVELS.indexOf(level) < LEVELS.indexOf($("log-level").value)) return false;
+    if (fgPids && !fgPids.has(pid)) return false;
+    const q = $("log-filter").value.trim().toLowerCase();
+    return !q || tag.toLowerCase().includes(q) || msg.toLowerCase().includes(q);
+  }
+
+  function lineNode(entry) {
+    const [ts, , , level, tag, msg] = entry;
+    const div = document.createElement("div");
+    div.className = level;
+    div.innerHTML = '<span class="ts"></span> <span class="lv"></span> <span class="tag"></span> <span class="msg"></span>';
+    div.children[0].textContent = ts;
+    div.children[1].textContent = level;
+    div.children[2].textContent = tag;
+    div.children[3].textContent = msg;
+    return div;
+  }
+
+  function atBottom() { return logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 24; }
+
+  function showEmpty() {
+    if (logEl.childElementCount) return;
+    const p = document.createElement("p");
+    p.className = "log-empty";
+    p.textContent = logs.length ? "No lines match" : "Waiting for logs…";
+    logEl.append(p);
+  }
+
+  function renderLogs() {
+    logEl.replaceChildren(...logs.filter(matches).slice(-2000).map(lineNode));
+    showEmpty();
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function addLogs(lines) {
+    logs.push(...lines);
+    if (logs.length > 4000) logs = logs.slice(-2000);
+    if (paused) return;
+    const stick = atBottom();
+    const fresh = lines.filter(matches);
+    if (!fresh.length) return showEmpty();
+    logEl.querySelector(".log-empty")?.remove();
+    const frag = document.createDocumentFragment();
+    fresh.forEach((e) => frag.append(lineNode(e)));
+    logEl.append(frag);
+    while (logEl.childElementCount > 2000) logEl.firstElementChild.remove();
+    if (stick) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  async function pollForeground() {
+    clearTimeout(fgTimer);
+    if (!$("log-fg").checked || !logcatWanted()) {
+      if (!$("log-fg").checked) { fgPids = null; $("log-app").textContent = ""; }
+      return;
+    }
+    try {
+      const r = await (await fetch("api/foreground")).json();
+      const next = new Set(r.pids || []);
+      const changed = !fgPids || next.size !== fgPids.size || [...next].some((p) => !fgPids.has(p));
+      fgPids = next;
+      $("log-app").textContent = r.package || "";
+      if (changed) renderLogs();
+    } catch {}
+    fgTimer = setTimeout(pollForeground, 3000);
+  }
+
+  let filterTimer = null;
+  $("log-filter").addEventListener("input", () => { clearTimeout(filterTimer); filterTimer = setTimeout(renderLogs, 120); });
+  $("log-level").addEventListener("change", renderLogs);
+  $("log-fg").addEventListener("change", () => { if (!$("log-fg").checked) { fgPids = null; renderLogs(); } pollForeground(); });
+  $("log-pause").addEventListener("click", () => {
+    paused = !paused;
+    const b = $("log-pause");
+    b.setAttribute("aria-pressed", String(paused));
+    b.setAttribute("aria-label", paused ? "Resume" : "Pause");
+    b.title = paused ? "Resume" : "Pause";
+    b.firstElementChild.innerHTML = paused ? '<path d="M8 5.5v13l10.5-6.5z"/>' : '<path d="M9 6v12M15 6v12"/>';
+    if (!paused) renderLogs();
+  });
+  $("log-clear").addEventListener("click", () => { logs = []; renderLogs(); });
+
   setPanel(localStorage.getItem("panel") === "1" || (localStorage.getItem("panel") === null && matchMedia("(min-width: 1200px)").matches), false);
 
   const clip = $("clip");
