@@ -1,3 +1,5 @@
+> [!NOTE]
+> This is a fork of [budtmo/docker-android](https://github.com/budtmo/docker-android) by [Budi Utomo](https://github.com/budtmo). All credit for Docker-Android goes to him and its contributors. This fork adds a responsive browser UI, Android 15–17 support and a few fixes, and it collects no usage analytics. See [What's new in this fork](#whats-new-in-this-fork). The project stays under its original [license](./LICENSE.md).
 
 <p align="center">
   <img id="header" src="./images/logo_docker-android.png" />
@@ -6,6 +8,73 @@
 [![Paypal Donate](https://img.shields.io/badge/paypal-donate-blue.svg)](http://paypal.me/budtmo) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com) [![codecov](https://codecov.io/gh/budtmo/docker-android/branch/master/graph/badge.svg)](https://codecov.io/gh/budtmo/docker-android) [![Join the chat at https://gitter.im/budtmo/docker-android](https://badges.gitter.im/budtmo/docker-android.svg)](https://gitter.im/budtmo/docker-android?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge) [![GitHub release](https://img.shields.io/github/release/budtmo/docker-android.svg)](https://github.com/budtmo/docker-android/releases)
 
 Docker-Android is a docker image built to be used for everything related to Android. It can be used for Application development and testing (native, web and hybrid-app).
+
+What's new in this fork
+-----------------------
+
+### Browser UI
+
+A new web UI shows only the device screen in a device frame, instead of a whole VNC desktop. It fits any window, from a wide monitor down to a phone, and talks to the emulator through its built-in gRPC API.
+
+| Desktop | Phone |
+|---|---|
+| ![Web UI with the device panel open](./images/fork-web-ui-desktop.png) | ![Web UI at phone width](./images/fork-web-ui-phone.png) |
+
+- **Device view:** live screen at up to about 24 fps, touch and drag, keyboard input and paste, rotation, and a circular touch cursor.
+- **Toolbar:** back, home, recent apps, volume, rotate, screenshot and power.
+- **Device panel:** device info, two-way clipboard sync, open a URL, light or dark appearance, battery level and charging, GPS location, and APK install by file picker or drag and drop.
+- **Logcat:** live device logs with text, level and foreground-app filters, pause and clear.
+
+| Logcat |
+|---|
+| ![Logcat tab in the device panel](./images/fork-web-ui-logcat.png) |
+
+Turn it on with `WEB_UI=true`. Add `EMULATOR_HEADLESS=true` to run the emulator without a window, so Xvfb, Openbox and VNC do not start:
+
+```
+docker run -d -p 6080:6090 --device /dev/kvm --name android-container \
+  -e EMULATOR_DEVICE="Samsung Galaxy S10" -e WEB_UI=true -e EMULATOR_HEADLESS=true \
+  docker-android:emulator_16.0-webui
+```
+
+Then open ***http://localhost:6080***.
+
+|Environment variable|Default|Description|
+|---|---|---|
+|WEB_UI|false|Start the browser UI|
+|WEB_UI_PORT|6090|Port of the browser UI inside the container|
+|WEB_UI_MAX_EDGE|1280|Longest edge of streamed frames, in pixels|
+|WEB_UI_JPEG_QUALITY|80|JPEG quality of streamed frames|
+
+### Android 15, 16 and 17
+
+|Android|API|Notes|
+|---|---|---|
+|15.0|35||
+|16.0|36|Recommended|
+|17.0|37.0|Unstable, see below|
+
+On Android 17 the system process crashes when it reads screen pixels back (for example, the Recent apps thumbnail taken when an app goes to the background). The emulator graphics driver in the Android 17 image asserts on a feature (`hasReadColorBufferDma`) that the emulator does not provide with software rendering. The emulator uses three-button navigation on Android 17 to avoid one trigger, but the others remain. Use Android 16 until a newer emulator or system image fixes this.
+
+### Other changes
+
+- **No usage analytics.** The Google Form ID, the ipinfo.io lookup and the code that sent usage data were removed, as the license requires for forks.
+- **Bigger data partition.** `EMULATOR_DATA_PARTITION` now defaults to `4g`. Android 17 fills the old `550m` default during boot. The disk image grows only as it is used.
+- **Headless mode.** `EMULATOR_HEADLESS=true` now passes `-no-window` to the emulator.
+- **Self-contained build.** The emulator image builds without upstream's private build script. The Dockerfile installs `openbox`, `menu`, `sudo` and `python3-venv`, and [`mixins/scripts/install-cli.sh`](./mixins/scripts/install-cli.sh) installs the CLI.
+
+### Build
+
+The base image comes from Docker Hub. Pick an Android version and its API level from the table above:
+
+```
+DOCKER_BUILDKIT=1 docker build -t docker-android:emulator_16.0-webui \
+  --build-arg DOCKER_ANDROID_VERSION=v3.9.0-p1 \
+  --build-arg EMULATOR_ANDROID_VERSION=16.0 --build-arg EMULATOR_API_LEVEL=36 \
+  --secret id=extension,src=mixins/scripts/install-cli.sh \
+  -f docker/emulator/Dockerfile .
+```
+
 
 Sponsors
 --------
