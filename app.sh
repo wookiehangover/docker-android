@@ -48,7 +48,7 @@ else
 fi
 
 if [[ "${p}" == *"emulator"* ]]; then
-    supported_android_version=("9.0" "10.0" "11.0" "12.0" "13.0" "14.0")
+    supported_android_version=("9.0" "10.0" "11.0" "12.0" "13.0" "14.0" "15.0" "16.0" "17.0")
     declare -A api_levels=(
         ["9.0"]=28
         ["10.0"]=29
@@ -56,6 +56,9 @@ if [[ "${p}" == *"emulator"* ]]; then
         ["12.0"]=32
         ["13.0"]=33
         ["14.0"]=34
+        ["15.0"]=35
+        ["16.0"]=36
+        ["17.0"]=37.0
     )
 
     # To get the last index
