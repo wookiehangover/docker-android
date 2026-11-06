@@ -1,3 +1,5 @@
+> **This fork collects no usage analytics.** The Google Form ID, the ipinfo.io location lookup and the code that sent the data were removed, as the [license](../LICENSE.md) requires for forks. `USER_BEHAVIOR_ANALYTICS` has no effect. The text below describes the upstream project.
+
 # Docker-Android's Anonymous Aggregate User Behavior Analytics
 Docker-Android has begun gathering anonymous aggregate user behavior analytics and reporting these to Google Sheets through Google Forms API (Google Form ID: 1FAIpQLSdrKWQdMh6Nt8v8NQdYvTIntohebAgqWCpXT3T9NofAoxcpkw). You are notified about this when you start Docker-Android.
 

@@ -84,16 +84,6 @@ class Emulator(Device):
         self.no_skin = convert_str_to_bool(os.getenv(ENV.EMULATOR_NO_SKIN))
         self.interval_after_booting = 15
         Emulator.adb_name_id += 2
-        self.form_data.update({
-            self.form_field[Device.FORM_SCREEN_RESOLUTION]: f"{os.getenv(ENV.SCREEN_WIDTH)}x"
-                                                            f"{os.getenv(ENV.SCREEN_HEIGHT)}x"
-                                                            f"{os.getenv(ENV.SCREEN_DEPTH)}",
-            self.form_field[Device.FORM_EMU_DEVICE]: self.device,
-            self.form_field[Device.FORM_EMU_ANDROID_VERSION]: self.android_version,
-            self.form_field[Device.FORM_EMU_NO_SKIN]: self.no_skin,
-            self.form_field[Device.FORM_EMU_DATA_PARTITION]: self.data_partition,
-            self.form_field[Device.FORM_EMU_ADDITIONAL_ARGS]: self.additional_args
-        })
 
     def is_initialized(self) -> bool:
         import re
