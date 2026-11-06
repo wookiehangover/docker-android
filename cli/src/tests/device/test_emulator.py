@@ -88,6 +88,13 @@ class TestEmulator(BaseDeviceTest):
             self.assertEqual(args.count("-no-window"), 1)
             self.assertEqual(args[-1:], expected_tail)
 
+    def test_three_button_navigation_only_from_min_api(self):
+        for api_level, expected_calls in (("36", 0), ("37.0", 1)):
+            self.emu.api_level = api_level
+            with mock.patch("subprocess.call", return_value=0) as call:
+                self.emu._use_three_button_navigation()
+            self.assertEqual(call.call_count, expected_calls)
+
     def test_use_override_config_no_env(self):
         with mock.patch("os.getenv", return_value=None):
             self.emu._use_override_config()

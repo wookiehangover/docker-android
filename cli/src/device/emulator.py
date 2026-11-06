@@ -42,6 +42,9 @@ class Emulator(Device):
     }
 
     adb_name_id = 5554
+    # Gesture navigation makes SurfaceFlinger's region sampling abort on these images
+    # with software rendering (hasReadColorBufferDma assertion), crash-looping system_server.
+    MIN_API_THREE_BUTTON_NAV = 37
 
     class ReadinessCheck(Enum):
         BOOTED = "booted"
@@ -234,6 +237,7 @@ class Emulator(Device):
         focus_cmd = f"adb -s {self.adb_name} shell dumpsys window | grep -i mCurrentFocus"
         self.check_adb_command(self.ReadinessCheck.BOOTED,
                                booting_cmd, "1", 60, self.interval_waiting)
+        self._use_three_button_navigation()
         time.sleep(self.interval_after_booting)
 
         interval_pop_up = 0
@@ -255,6 +259,18 @@ class Emulator(Device):
         self.check_adb_command(self.ReadinessCheck.WELCOME_SCREEN,
                                focus_cmd, "launcheractivity", 60, self.interval_waiting)
         self.logger.info(f"{self.device_type} is ready to use")
+
+    def _use_three_button_navigation(self) -> None:
+        if int(float(self.api_level)) < self.MIN_API_THREE_BUTTON_NAV:
+            return
+        cmd = f"adb -s {self.adb_name} shell cmd overlay enable-exclusive " \
+              f"--category com.android.internal.systemui.navbar.threebutton"
+        for _ in range(10):
+            if subprocess.call(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+                self.logger.info("Three-button navigation is enabled")
+                return
+            time.sleep(2)
+        self.logger.warning("Three-button navigation could not be enabled")
 
     def tear_down(self, *args) -> None:
         self.logger.warning("Sigterm is detected! Nothing to do!")
