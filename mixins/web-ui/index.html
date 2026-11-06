@@ -605,7 +605,8 @@
       $("label").textContent = i.label;
       setShape(i.width, i.height, false);
       $("i-model").textContent = i.label;
-      $("i-android").textContent = i.android ? `${i.android} (API ${i.api})` : "–";
+      const trim = (v) => String(v).replace(/\.0$/, "");
+      $("i-android").textContent = i.android ? `${trim(i.android)} (API ${trim(i.api)})` : "–";
       $("i-display").textContent = `${i.width} × ${i.height}${i.density ? ` · ${i.density} dpi` : ""}`;
       $("i-memory").textContent = i.ram ? `${(i.ram / 1024).toFixed(i.ram % 1024 ? 1 : 0)} GB · ${i.cores} cores` : "–";
       $("i-emulator").textContent = i.emulator || "–";
