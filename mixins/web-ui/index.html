@@ -102,8 +102,31 @@
     background: #050505;
     outline: none;
     touch-action: none;
-    cursor: default;
+    cursor: none;
   }
+  .touch-dot {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 30px;
+    height: 30px;
+    margin: -15px 0 0 -15px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 120ms ease;
+    will-change: transform;
+  }
+  .touch-dot span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9), 0 1px 8px rgba(0, 0, 0, 0.35);
+    transition: transform 120ms ease, background-color 120ms ease;
+  }
+  .touch-dot.on { opacity: 1; }
+  .touch-dot.down span { transform: scale(0.8); background: rgba(255, 255, 255, 0.45); }
   .screen canvas { width: 100%; height: 100%; display: block; }
   .toolbar { display: flex; gap: 10px; }
   .group {
@@ -357,7 +380,7 @@
     button { width: 36px; height: 36px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    :root, button, .panel, .scrim, .switch, .switch::after { transition: none !important; }
+    :root, button, .panel, .scrim, .switch, .switch::after, .touch-dot, .touch-dot span { transition: none !important; }
   }
 </style>
 </head>
@@ -367,7 +390,7 @@
 <main>
   <div class="badge"><span id="label">Android</span><span id="state" class="state">connecting</span></div>
   <div class="device">
-    <div id="screen" class="screen" tabindex="0" aria-label="Device screen"><canvas id="canvas"></canvas></div>
+    <div id="screen" class="screen" tabindex="0" aria-label="Device screen"><canvas id="canvas"></canvas><div class="touch-dot" id="touch-dot" aria-hidden="true"><span></span></div></div>
   </div>
   <nav class="toolbar">
     <div class="group">
@@ -529,11 +552,25 @@
     };
   }
 
+  const dot = document.getElementById("touch-dot");
+  function moveDot(e) {
+    if (e.pointerType === "touch") return dot.classList.remove("on");
+    const r = screen.getBoundingClientRect();
+    const x = Math.min(r.width, Math.max(0, e.clientX - r.left));
+    const y = Math.min(r.height, Math.max(0, e.clientY - r.top));
+    dot.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    dot.classList.add("on");
+  }
+  screen.addEventListener("pointerenter", moveDot);
+  screen.addEventListener("pointermove", moveDot);
+  screen.addEventListener("pointerleave", () => { if (pointerId === null) dot.classList.remove("on"); });
+
   let pointerId = null, moveQueued = null;
   screen.addEventListener("pointerdown", (e) => {
     if (pointerId !== null) return;
     pointerId = e.pointerId;
     screen.setPointerCapture(e.pointerId);
+    dot.classList.add("down");
     screen.focus({ preventScroll: true });
     send({ t: "touch", down: true, ...point(e) });
   });
@@ -546,6 +583,9 @@
     if (e.pointerId !== pointerId) return;
     pointerId = null;
     moveQueued = null;
+    dot.classList.remove("down");
+    const r = screen.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dot.classList.remove("on");
     send({ t: "touch", down: false, ...point(e) });
   };
   screen.addEventListener("pointerup", release);
