@@ -37,7 +37,7 @@ def get_device(given_input: str) -> Union[Emulator, GenyAWS, GenySAAS, None]:
         emu_sys_img = get_env_value_or_raise(ENV.EMULATOR_SYS_IMG)
 
         emu_device = os.getenv(ENV.EMULATOR_DEVICE, "Nexus 5")
-        emu_data_partition = os.getenv(ENV.EMULATOR_DATA_PARTITION, "550m")
+        emu_data_partition = os.getenv(ENV.EMULATOR_DATA_PARTITION, "4g")
         emu_additional_args = os.getenv(ENV.EMULATOR_ADDITIONAL_ARGS, "")
 
         emu_name = os.getenv(ENV.EMULATOR_NAME, "{d}_{v}".format(
