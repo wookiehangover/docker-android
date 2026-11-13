@@ -1,302 +1,145 @@
-> [!NOTE]
-> This is a fork of [budtmo/docker-android](https://github.com/budtmo/docker-android) by [Budi Utomo](https://github.com/budtmo). All credit for Docker-Android goes to him and its contributors. This fork adds a responsive browser UI, Android 15–17 support and a few fixes, and it collects no usage analytics. See [What's new in this fork](#whats-new-in-this-fork). The project stays under its original [license](./LICENSE.md).
+docker-android
+==============
 
-<p align="center">
-  <img id="header" src="./images/logo_docker-android.png" />
-</p>
+Android emulator in Docker with a responsive browser UI. Run it on a Linux host with KVM, then use the device from any browser, including a phone.
 
-[![Paypal Donate](https://img.shields.io/badge/paypal-donate-blue.svg)](http://paypal.me/budtmo) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com) [![codecov](https://codecov.io/gh/budtmo/docker-android/branch/master/graph/badge.svg)](https://codecov.io/gh/budtmo/docker-android) [![Join the chat at https://gitter.im/budtmo/docker-android](https://badges.gitter.im/budtmo/docker-android.svg)](https://gitter.im/budtmo/docker-android?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge) [![GitHub release](https://img.shields.io/github/release/budtmo/docker-android.svg)](https://github.com/budtmo/docker-android/releases)
-
-Docker-Android is a docker image built to be used for everything related to Android. It can be used for Application development and testing (native, web and hybrid-app).
-
-What's new in this fork
------------------------
-
-### Browser UI
-
-A new web UI shows only the device screen in a device frame, instead of a whole VNC desktop. It fits any window, from a wide monitor down to a phone, and talks to the emulator through its built-in gRPC API.
+This is a fork of [budtmo/docker-android](https://github.com/budtmo/docker-android) by [Budi Utomo](https://github.com/budtmo). The emulator image, CLI and device profiles come from that project. See [Changes from upstream](#changes-from-upstream) for what this fork adds.
 
 | Desktop | Phone |
 |---|---|
 | ![Web UI with the device panel open](./images/fork-web-ui-desktop.png) | ![Web UI at phone width](./images/fork-web-ui-phone.png) |
 
-- **Device view:** live screen at up to about 24 fps, touch and drag, keyboard input and paste, rotation, and a circular touch cursor.
-- **Toolbar:** back, home, recent apps, volume, rotate, screenshot and power.
-- **Device panel:** device info, two-way clipboard sync, open a URL, light or dark appearance, battery level and charging, GPS location, and APK install by file picker or drag and drop.
-- **Logcat:** live device logs with text, level and foreground-app filters, pause and clear.
+Features
+--------
+
+- **Device view.** Only the device screen, in a device frame that fits any window. Touch and drag, keyboard input and paste, rotation, and a circular touch cursor.
+- **Toolbar.** Back, home, recent apps, volume, rotate, screenshot and power.
+- **Device panel.** Device info, two-way clipboard sync, open a URL, light or dark appearance, battery level and charging, GPS location, and APK install by file picker or drag and drop.
+- **Logcat.** Live device logs with text, level and foreground-app filters, pause and clear.
+- **Headless.** With `EMULATOR_HEADLESS=true` the emulator runs without a window, so Xvfb, Openbox and VNC do not start.
 
 | Logcat |
 |---|
 | ![Logcat tab in the device panel](./images/fork-web-ui-logcat.png) |
 
-Turn it on with `WEB_UI=true`. Add `EMULATOR_HEADLESS=true` to run the emulator without a window, so Xvfb, Openbox and VNC do not start:
-
-```
-docker run -d -p 6080:6090 --device /dev/kvm --name android-container \
-  -e EMULATOR_DEVICE="Samsung Galaxy S10" -e WEB_UI=true -e EMULATOR_HEADLESS=true \
-  docker-android:emulator_16.0-webui
-```
-
-Then open ***http://localhost:6080***.
-
-|Environment variable|Default|Description|
-|---|---|---|
-|WEB_UI|false|Start the browser UI|
-|WEB_UI_PORT|6090|Port of the browser UI inside the container|
-|WEB_UI_MAX_EDGE|1280|Longest edge of streamed frames, in pixels|
-|WEB_UI_JPEG_QUALITY|80|JPEG quality of streamed frames|
-
-### Android 15, 16 and 17
-
-|Android|API|Notes|
-|---|---|---|
-|15.0|35||
-|16.0|36|Recommended|
-|17.0|37.0|Unstable, see below|
-
-On Android 17 the system process crashes when it reads screen pixels back (for example, the Recent apps thumbnail taken when an app goes to the background). The emulator graphics driver in the Android 17 image asserts on a feature (`hasReadColorBufferDma`) that the emulator does not provide with software rendering. The emulator uses three-button navigation on Android 17 to avoid one trigger, but the others remain. Use Android 16 until a newer emulator or system image fixes this.
-
-### Other changes
-
-- **No usage analytics.** The Google Form ID, the ipinfo.io lookup and the code that sent usage data were removed, as the license requires for forks.
-- **Bigger data partition.** `EMULATOR_DATA_PARTITION` now defaults to `4g`. Android 17 fills the old `550m` default during boot. The disk image grows only as it is used.
-- **Headless mode.** `EMULATOR_HEADLESS=true` now passes `-no-window` to the emulator.
-- **Self-contained build.** The emulator image builds without upstream's private build script. The Dockerfile installs `openbox`, `menu`, `sudo` and `python3-venv`, and [`mixins/scripts/install-cli.sh`](./mixins/scripts/install-cli.sh) installs the CLI.
-
-### Build
-
-The base image comes from Docker Hub. Pick an Android version and its API level from the table above:
-
-```
-DOCKER_BUILDKIT=1 docker build -t docker-android:emulator_16.0-webui \
-  --build-arg DOCKER_ANDROID_VERSION=v3.9.0-p1 \
-  --build-arg EMULATOR_ANDROID_VERSION=16.0 --build-arg EMULATOR_API_LEVEL=36 \
-  --secret id=extension,src=mixins/scripts/install-cli.sh \
-  -f docker/emulator/Dockerfile .
-```
-
-
-Sponsors
---------
-
-<p align="center">
-  <a href="https://proxy-seller.com/?utm_source=github&utm_medium=referral&utm_campaign=budtmo&utm_term=github">
-    <img src="./images/sponsor_proxyseller.png" alt="ProxySeller" width="500">
-  </a>
-</p>
-
-[Proxy-Seller](https://proxy-seller.com/?utm_source=github&utm_medium=referral&utm_campaign=budtmo&utm_term=github) gives you reliable proxy infrastructure for any workflow: private residential, mobile (4G/5G/LTE), ISP, and datacenter IPv4/IPv6 proxies, all with HTTP(S) and SOCKS5 support. Tap into 47M+ residential IPs across 220+ locations, target exactly the country, city, or ISP you need, and count on 99.7% uptime backed by 24/7 support. Get 15% off with promo code **BUDTMO**.
-
-Advantages of using this project
---------------------------------
-1. Emulator with different device profile and skins, such as Samsung Galaxy S6, LG Nexus 4, HTC Nexus One and more.
-2. Support vnc to be able to see what happen inside docker container
-3. Support log sharing feature where all logs can be accessed from web-UI
-4. Ability to control emulator from outside container by using adb connect
-5. Integrated with other cloud solutions, e.g. [Genymotion Cloud](https://www.genymotion.com/cloud/)
-6. It can be used to build Android project
-7. It can be used to run unit and UI-Test with different test-frameworks, e.g. Appium, Espresso, etc.
-8. It support (http) docker-android MCP-Server (beta-version)
-9. It support Appium MCP
-10. It support AI-Agent (beta-version) - supported local-LLM server: Ollama, VLLM
-
-<p align="center">
-  <img src="./images/mcp_and_ai_agent.png">
-</p>
-
-<p align="center">
-  <img src="./images/mcp_appium_and_ai_agent.png">
-</p>
-
-List of Docker-Images
----------------------
-|Android   |API   |Image with latest release version   |Image with specific release version|
-|:---|:---|:---|:---|
-|9.0|28|budtmo/docker-android:emulator_9.0|budtmo/docker-android:emulator_9.0_<release_version>|
-|10.0|29|budtmo/docker-android:emulator_10.0|budtmo/docker-android:emulator_10.0_<release_version>|
-|11.0|30|budtmo/docker-android:emulator_11.0|budtmo/docker-android:emulator_11.0_<release_version>|
-|12.0|32|budtmo/docker-android:emulator_12.0|budtmo/docker-android:emulator_12.0_<release_version>|
-|13.0|33|budtmo/docker-android:emulator_13.0|budtmo/docker-android:emulator_13.0_<release_version>|
-|14.0|34|budtmo/docker-android:emulator_14.0|budtmo/docker-android:emulator_14.0_<release_version>|
-|-|-|budtmo/docker-android:genymotion|budtmo/docker-android:genymotion_<release_version>|
-|-|-|budtmo/docker-android:mcp|budtmo/docker-android:mcp_<release_version>|
-
-List of Devices
----------------
-
-Type   | Device Name
------  | -----
-Phone  | Samsung Galaxy S10
-Phone  | Samsung Galaxy S9
-Phone  | Samsung Galaxy S8
-Phone  | Samsung Galaxy S7 Edge
-Phone  | Samsung Galaxy S7
-Phone  | Samsung Galaxy S6
-Phone  | Nexus 4
-Phone  | Nexus 5
-Phone  | Nexus One
-Phone  | Nexus S
-Tablet | Nexus 7
-Tablet | Pixel C
+The browser UI talks to the emulator through its built-in gRPC API and streams the screen at up to about 24 fps. It sends frames only when the screen changes.
 
 Requirements
 ------------
 
-1. Docker is installed on your system.
+- Linux host with hardware virtualization. Check it with `sudo apt install cpu-checker && kvm-ok`.
+- Docker with BuildKit.
 
-Quick Start
+Quick start
 -----------
 
-1. If you use ***Ubuntu OS*** on your host machine, you can skip this step. For ***OSX*** and ***Windows OS*** user, you need to use Virtual Machine that support Virtualization with Ubuntu OS because the image can be run under ***Ubuntu OS only***.
+1. Build the image. Pick an Android version and its API level from [Android versions](#android-versions).
 
-2. Your machine should support virtualization. To check if the virtualization is enabled is:
     ```
-    sudo apt install cpu-checker
-    kvm-ok
-    ```
-
-3. Run Docker-Android container
-    ```
-    docker run -d -p 6080:6080 -e EMULATOR_DEVICE="Samsung Galaxy S10" -e WEB_VNC=true --device /dev/kvm --name android-container budtmo/docker-android:emulator_11.0
+    DOCKER_BUILDKIT=1 docker build -t docker-android:emulator_16.0-webui \
+      --build-arg DOCKER_ANDROID_VERSION=v3.9.0-p1 \
+      --build-arg EMULATOR_ANDROID_VERSION=16.0 --build-arg EMULATOR_API_LEVEL=36 \
+      --secret id=extension,src=mixins/scripts/install-cli.sh \
+      -f docker/emulator/Dockerfile .
     ```
 
-4. Open ***http://localhost:6080*** to see inside running container.
+    The base image `budtmo/docker-android:base_v3.9.0-p1` comes from Docker Hub.
 
-5. To check the status of the emulator
+2. Run the container.
+
     ```
-    docker exec -it android-container cat device_status
+    docker run -d --name android --device /dev/kvm -p 6080:6090 \
+      -e EMULATOR_DEVICE="Samsung Galaxy S10" -e WEB_UI=true -e EMULATOR_HEADLESS=true \
+      docker-android:emulator_16.0-webui
+    ```
+
+3. Open ***http://localhost:6080***. The page shows *connecting* until the emulator boots, usually in under a minute.
+
+4. Check the emulator status at any time.
+
+    ```
+    docker exec android cat device_status
     ```
 
 Persisting data
------------
+---------------
 
-The default behaviour is to destroy the emulated device on container restart. To persist data, you need to mount a volume at `/home/androidusr`:
-    ```
-    docker run -v data:/home/androidusr budtmo/docker-android:emulator_11.0
-    ```
+The emulated device is created again when the container is recreated. To keep installed apps and settings, mount volumes for the device and its adb keys:
 
-WSL2 Hardware acceleration (Windows 11 only)
------------
+```
+docker run ... \
+  -v android-emulator:/home/androidusr/emulator \
+  -v android-home:/home/androidusr/.android \
+  docker-android:emulator_16.0-webui
+```
 
-Credit goes to [Guillaume - The Parallel Interface blog](https://www.paralint.com/2022/11/find-new-modified-and-unversioned-subversion-files-on-windows)
+Configuration
+-------------
 
-[Microsoft - Advanced settings configuration in WSL](https://learn.microsoft.com/en-us/windows/wsl/wsl-config)
+|Environment variable|Default|Description|
+|---|---|---|
+|EMULATOR_DEVICE|Nexus 5|Device profile, see [Devices](#devices)|
+|WEB_UI|false|Start the browser UI|
+|WEB_UI_PORT|6090|Port of the browser UI inside the container|
+|WEB_UI_MAX_EDGE|1280|Longest edge of streamed frames, in pixels|
+|WEB_UI_JPEG_QUALITY|80|JPEG quality of streamed frames|
+|EMULATOR_HEADLESS|false|Run the emulator without a window and skip Xvfb and VNC|
+|EMULATOR_DATA_PARTITION|4g|Size of the device data partition|
+|EMULATOR_ADDITIONAL_ARGS||Extra arguments for the `emulator` command|
+|WEB_VNC|false|Start the original noVNC desktop view on port 6080 instead|
 
+The upstream [configuration guide](./documentations/CUSTOM_CONFIGURATIONS.md) lists the other options, such as Appium and log sharing.
 
-1. Add yourself to the `kvm` usergroup.
-    ```
-    sudo usermod -a -G kvm ${USER}
-    ```
+Android versions
+----------------
 
-2. Add necessary flags to `/etc/wsl.conf` to their respective sections.
-    ```
-    [boot]
-    command = /bin/bash -c 'chown -v root:kvm /dev/kvm && chmod 660 /dev/kvm'
-    ```
+|Android|API (`EMULATOR_API_LEVEL`)|Notes|
+|---|---|---|
+|9.0|28||
+|10.0|29||
+|11.0|30||
+|12.0|32||
+|13.0|33||
+|14.0|34||
+|15.0|35||
+|16.0|36|Recommended|
+|17.0|37.0|Unstable, see below|
 
-    Then, using PowerShell, open a notepad on `notepad $env:USERPROFILE\.wslconfig`. Inside, put these other flags:
-    ```
-    [wsl2]
-    nestedVirtualization=true
-    ```
+**Android 17 is unstable with software rendering.** Its system process crashes when it reads screen pixels back, for example for the Recent apps thumbnail taken when an app goes to the background. The emulator graphics driver in the Android 17 image asserts on a feature (`hasReadColorBufferDma`) that the emulator does not provide without a GPU. The CLI switches Android 17 to three-button navigation to avoid one trigger, but the others remain. Use Android 16 until a newer emulator or system image fixes this.
 
-4. Restart WSL2 via CMD prompt or Powershell
-    ```
-    wsl --shutdown
-    ```
+Devices
+-------
 
+|Type|Device|
+|---|---|
+|Phone|Samsung Galaxy S10, S9, S8, S7 Edge, S7, S6|
+|Phone|Nexus 4, Nexus 5, Nexus One, Nexus S|
+|Tablet|Nexus 7, Pixel C|
 
-`command = /bin/bash -c 'chown -v root:kvm /dev/kvm && chmod 660 /dev/kvm'` sets `/dev/kvm` to `kvm` usergroup rather than the default `root` usergroup on WSL2 startup.
+The emulator skins come from [Android Studio](https://developer.android.com/studio) and the [Samsung Developer website](https://developer.samsung.com/).
 
-`nestedVirtualization` flag is only available to Windows 11.
-
-If this setup does not work, you may have an old WSL version. In that case, ignore `\.wslconfig` and put everything on `/etc/wsl.conf`, including the `[wsl2]` flag.
-
-Use-Cases
----------
-
-1. [Build Android project](./documentations/USE_CASE_BUILD_ANDROID_PROJECT.md)
-2. [UI-Test with Appium](./documentations/USE_CASE_APPIUM.md)
-3. [Control Android emulator on host machine](./documentations/USE_CASE_CONTROL_EMULATOR.md)
-4. [SMS Simulation](./documentations/USE_CASE_SMS.md)
-5. [Jenkins](./documentations/USE_CASE_JENKINS.md)
-6. [Deploying on cloud (Azure, AWS, GCP)](./documentations/USE_CASE_CLOUD.md)
-
-Custom-Configurations
+Changes from upstream
 ---------------------
 
-This [document](./documentations/CUSTOM_CONFIGURATIONS.md) contains information about configurations that can be used to enable some features, e.g. log-sharing, etc.
+- **Browser UI** in [`mixins/web-ui`](./mixins/web-ui), enabled with `WEB_UI=true`.
+- **Android 15, 16 and 17** support.
+- **No usage analytics.** The Google Form ID, the ipinfo.io lookup and the code that sent usage data were removed, as the [license](./LICENSE.md) requires for forks.
+- **Bigger data partition.** `EMULATOR_DATA_PARTITION` defaults to `4g`. Android 17 fills the old `550m` default during boot. The disk image grows only as it is used.
+- **Headless mode** passes `-no-window` to the emulator.
+- **Self-contained build.** The image builds without upstream's private build script. The Dockerfile installs `openbox`, `menu`, `sudo` and `python3-venv`, and [`mixins/scripts/install-cli.sh`](./mixins/scripts/install-cli.sh) installs the CLI.
 
-Genymotion
-----------
-
-<p align="center">
-  <img id="geny" src="./images/logo_genymotion_and_dockerandroid.png" />
-</p>
-
-For you who do not have ressources to maintain the simulator or to buy machines or need different device profiles, you can give a try by using [Genymotion SAAS](https://cloud.geny.io/). Docker-Android is [integrated with Genymotion](https://www.genymotion.com/blog/partner_tag/docker/) on different cloud services, e.g. Genymotion SAAS, AWS, GCP, Alibaba Cloud. Please follow [this document](./documentations/THIRD_PARTY_GENYMOTION.md) for more detail.
-
-Emulator Skins
---------------
-The Emulator skins are taken from [Android Studio IDE](https://developer.android.com/studio) and [Samsung Developer Website](https://developer.samsung.com/)
-
-USERS
------
-
-<a href="https://lookerstudio.google.com/s/iGaemHJqQvg">
-  <p align="center">
-    <img src="./images/docker-android_users.png" alt="docker-android-users" width="800" height="600">
-  </p>
-</a>
-
-PRO VERSION
+More guides
 -----------
 
-Due to high requests for help and to be able to actively maintain the projects, the creator has decided to create docker-android-pro. Docker-Android-Pro is a sponsor based project which mean that the docker image of pro-version can be pulled only by [active sponsor](https://github.com/sponsors/budtmo).
+These upstream guides still apply. They use upstream image names; use your local image instead.
 
-The differences between normal version and pro version are:
+- [Control the emulator from the host with adb](./documentations/USE_CASE_CONTROL_EMULATOR.md)
+- [UI tests with Appium](./documentations/USE_CASE_APPIUM.md)
+- [Build an Android project](./documentations/USE_CASE_BUILD_ANDROID_PROJECT.md)
+- [SMS simulation](./documentations/USE_CASE_SMS.md)
+- [Jenkins](./documentations/USE_CASE_JENKINS.md)
 
-|Feature   |Normal   |Pro   |Comment|
-|:---|:---|:---|:---|
-|user-behavior-analytics|Yes|No|-|
-|ai-agent|No|Yes|Currently supported local-LLM server: Ollama, VLLM|
-|proxy|No|Yes|Set up company proxy on Android emulator on fly|
-|language|No|Yes|Set up language on Android emulator on fly|
-|Newer Android version|No|Yes|Support other newer Android version e.g. Android 15, Android 16, Android 17, etc|
-|root-privileged|No|Yes|Able to run command with security privileged|
-|headless-mode|No|Yes|Save resources by using headless mode|
-|Selenium 4.x integration|No|Yes|Running Appium UI-Tests againt one (Selenium Hub) endpoint for Android- and iOS emulator(s) / device(s)|
-|multiple Android-Simulators|No|Yes (soon)|Save resources by having multiple Android-Simulators on one docker-container|
-|Google Play Store|No|Yes (soon)|-|
-|Video Recording|No|Yes (soon)|Helpful for debugging|
-
-List pro-version images:
-
-|Android   |API   |Type  |Image with latest release version   |Image with specific release version|
-|:---|:---|:---|:---|:---|
-|9.0|28|Normal|budtmo2/docker-android-pro:emulator_9.0|budtmo2/docker-android-pro:emulator_9.0_<release_version>|
-|10.0|29|Normal|budtmo2/docker-android-pro:emulator_10.0|budtmo2/docker-android-pro:emulator_10.0_<release_version>|
-|11.0|30|Normal|budtmo2/docker-android-pro:emulator_11.0|budtmo2/docker-android-pro:emulator_11.0_<release_version>|
-|12.0|32|Normal|budtmo2/docker-android-pro:emulator_12.0|budtmo2/docker-android-pro:emulator_12.0_<release_version>|
-|13.0|33|Normal|budtmo2/docker-android-pro:emulator_13.0|budtmo2/docker-android-pro:emulator_13.0_<release_version>|
-|14.0|34|Normal|budtmo2/docker-android-pro:emulator_14.0|budtmo2/docker-android-pro:emulator_14.0_<release_version>|
-|15.0|35|Normal|budtmo2/docker-android-pro:emulator_15.0|budtmo2/docker-android-pro:emulator_15.0_<release_version>|
-|16.0|36|Normal|budtmo2/docker-android-pro:emulator_16.0|budtmo2/docker-android-pro:emulator_16.0_<release_version>|
-|17.0|37|Normal|budtmo2/docker-android-pro:emulator_17.0|budtmo2/docker-android-pro:emulator_17.0_<release_version>|
-|9.0|28|Headless|budtmo2/docker-android-pro:emulator_headless_9.0|budtmo2/docker-android-pro:emulator_headless_9.0_<release_version>|
-|10.0|29|Headless|budtmo2/docker-android-pro:emulator_headless_10.0|budtmo2/docker-android-pro:emulator_headless_10.0_<release_version>|
-|11.0|30|Headless|budtmo2/docker-android-pro:emulator_headless_11.0|budtmo2/docker-android-pro:emulator_headless_11.0_<release_version>|
-|12.0|32|Headless|budtmo2/docker-android-pro:emulator_headless_12.0|budtmo2/docker-android-pro:emulator_headless_12.0_<release_version>|
-|13.0|33|Headless|budtmo2/docker-android-pro:emulator_headless_13.0|budtmo2/docker-android-pro:emulator_headless_13.0_<release_version>|
-|14.0|34|Headless|budtmo2/docker-android-pro:emulator_headless_14.0|budtmo2/docker-android-pro:emulator_headless_14.0_<release_version>|
-|15.0|35|Headless|budtmo2/docker-android-pro:emulator_headless_15.0|budtmo2/docker-android-pro:emulator_headless_15.0_<release_version>|
-|16.0|36|Headless|budtmo2/docker-android-pro:emulator_headless_16.0|budtmo2/docker-android-pro:emulator_headless_16.0_<release_version>|
-|17.0|37|Headless|budtmo2/docker-android-pro:emulator_headless_17.0|budtmo2/docker-android-pro:emulator_headless_17.0_<release_version>|
-|-|-|AI-Agent|budtmo2/docker-android-pro:agent|budtmo2/docker-android-pro:agent_<release_version>|
-|-|-|Selenium|budtmo2/docker-android-pro:selenium|budtmo2/docker-android-pro:selenium_<release_version>|
-
-This [document](./documentations/DOCKER-ANDROID-PRO.md) contains detail information about how to use docker-android-pro.
-
-LICENSE
+License
 -------
-See [License](LICENSE.md)
+
+Copyright 2023 Budi Utomo. Released under a custom Apache 2.0 license; see [LICENSE.md](./LICENSE.md).
