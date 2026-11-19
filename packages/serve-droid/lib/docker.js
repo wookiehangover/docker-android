@@ -39,7 +39,7 @@ export function ensureCustomImage(image) {
 }
 
 // Match the Dockerfile, CLI installer and device profiles from one revision.
-const revision = 'ff975cb2786dd4a7e411f09c0dc8ac010f1c8473';
+const revision = '94e5334371c90b596a703b9ddc553cb11ec8958c';
 const repository = 'https://github.com/wookiehangover/docker-android.git';
 export const apiLevels = new Map(Object.entries({
   '9.0': '28', '10.0': '29', '11.0': '30', '12.0': '32', '13.0': '33',
@@ -47,7 +47,8 @@ export const apiLevels = new Map(Object.entries({
 }));
 
 export function emulatorImage(android) {
-  const tag = `docker-android:emulator_${android}-webui`;
+  const suffix = android === '17.0' ? '-tools22' : '';
+  const tag = `docker-android:emulator_${android}-webui${suffix}`;
   for (const image of [tag, `wookiehangover/${tag}`]) {
     if (docker('image', 'ls', '-q', image)) return image;
   }

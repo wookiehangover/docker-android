@@ -36,6 +36,11 @@ Use `--android 15` to select a different build, or `--image REGISTRY/IMAGE:TAG`
 to use an existing compatible image. The image must support this fork's browser
 UI on port 6090. See `serve-droid --help` for all options.
 
+For Android 17, the launcher uses the image tag `emulator_17.0-webui-tools22`.
+If you already have an Android 17 device created with older SDK tools, choose
+a new name (for example, `--android 17 --name android17`) to create a fresh
+virtual device while keeping the old device data.
+
 ## Try the subpackage locally
 
 ```sh
@@ -47,3 +52,4 @@ From the repository root, run `npm --prefix packages/serve-droid run test:e2e`
 to pack and install the CLI, boot a disposable emulator, and check reuse,
 configuration conflicts, stop, and persistence after restart. The test prints
 the path to a screenshot. Set `ARTIFACT_DIR` to choose the output directory.
+Append `-- 17` to run the same check on Android 17 and verify the virtual device target.

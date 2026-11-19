@@ -19,7 +19,11 @@ cd "$work"
 npm pack "$package_dir" --silent >/dev/null
 npm install --no-audit --no-fund ./serve-droid-*.tgz >/dev/null
 cli=./node_modules/.bin/serve-droid
-url=$("$cli" --name "$name" --android 16 --device "Samsung Galaxy S10")
+android=${1:-16}
+url=$("$cli" --name "$name" --android "$android" --device "Samsung Galaxy S10")
+if [[ "$android" == 17 || "$android" == 17.0 ]]; then
+  docker exec "$container" sh -c 'grep -Fx target=android-37.0 ~/.android/avd/*.ini'
+fi
 port=${url##*:}
 # Build a tiny launcher activity using the SDK and JDK already in the image.
 docker exec -i "$container" sh -eu -c '
