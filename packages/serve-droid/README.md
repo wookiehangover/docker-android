@@ -1,7 +1,8 @@
 # serve-droid
 
 Start an Android emulator for the current project and print its browser URL.
-Requires Node.js 22+, a local Linux Docker engine with access to `/dev/kvm`,
+Requires Node.js 22+. On macOS, attach to a running Android Studio emulator.
+Container startup requires a local Linux Docker engine with access to `/dev/kvm`
 and an x86-64 host. Run from any project directory.
 
 ```sh
@@ -60,3 +61,33 @@ to pack and install the CLI, boot a disposable emulator, and check reuse,
 configuration conflicts, stop, and persistence after restart. The test prints
 the path to a screenshot. Set `ARTIFACT_DIR` to choose the output directory.
 Append `-- 17` to run the same check on Android 17 and verify the virtual device target.
+
+## Attach to Android Studio on macOS
+
+On macOS, running `serve-droid` defaults to `attach`. It checks for ADB and
+the emulator SDK (including its controller protocol). In a terminal it offers
+to install missing packages with `sdkmanager`. If needed, it offers to use
+Homebrew for the SDK command-line tools and Java. Without either installer,
+use Android Studio's SDK Manager. Noninteractive runs print setup instructions.
+Start an ARM64 virtual device in Android Studio's Device Manager on Apple silicon. The browser UI runs locally and uses the selected emulator's gRPC
+endpoint for display and input and its ADB serial for APK installs and logs.
+
+From the repository root, set up a Python environment once (Python 3.10+):
+
+```sh
+python3 -m venv ~/.venvs/serve-droid
+source ~/.venvs/serve-droid/bin/activate
+python -m pip install aiohttp grpcio grpcio-tools pillow 'PyJWT[crypto]>=2,<3'
+```
+
+With that environment active, run:
+
+```sh
+node packages/serve-droid/bin/serve-droid.js attach
+```
+
+Open the printed loopback URL (default port 6090). Use
+`attach --serial emulator-5554 --port 6080` to choose among running emulators
+or change the browser port. Set `ANDROID_HOME` for SDKs outside
+`~/Library/Android/sdk`. Ctrl-C closes the browser server and leaves the
+Android Studio device running. Linux container startup still uses `serve-droid start`.

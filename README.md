@@ -3,6 +3,8 @@ docker-android
 
 Android emulator in Docker with a responsive browser UI. Run it on a Linux host with KVM, then use the device from any browser, including a phone.
 
+On macOS, [attach the browser UI to a running Android Studio emulator](./packages/serve-droid/README.md#attach-to-android-studio-on-macos).
+
 This is a fork of [budtmo/docker-android](https://github.com/budtmo/docker-android) by [Budi Utomo](https://github.com/budtmo). The emulator image, CLI and device profiles come from that project. See [Changes from upstream](#changes-from-upstream) for what this fork adds.
 
 | Desktop | Phone |
@@ -132,7 +134,7 @@ The emulator skins come from [Android Studio](https://developer.android.com/stud
 Changes from upstream
 ---------------------
 
-- **Browser UI** in [`mixins/web-ui`](./mixins/web-ui), enabled with `WEB_UI=true`.
+- **Browser UI** in [`packages/serve-droid/web-ui`](./packages/serve-droid/web-ui), enabled with `WEB_UI=true`.
 - **Android 15, 16 and 17** support.
 - **No usage analytics.** The Google Form ID, the ipinfo.io lookup and the code that sent usage data were removed, as the [license](./LICENSE.md) requires for forks.
 - **Bigger data partition.** `EMULATOR_DATA_PARTITION` defaults to `4g`. Android 17 fills the old `550m` default during boot. The disk image grows only as it is used.
