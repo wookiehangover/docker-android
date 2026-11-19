@@ -1,0 +1,18 @@
+{
+  "name": "serve-droid",
+  "version": "0.1.0",
+  "description": "Start a Dockerized Android emulator and use it in your browser",
+  "type": "module",
+  "bin": {
+    "serve-droid": "./bin/serve-droid.js"
+  },
+  "files": ["bin", "lib", "LICENSE.md"],
+  "engines": { "node": ">=22" },
+  "scripts": { "test:e2e": "bash test/lifecycle.sh" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wookiehangover/docker-android.git",
+    "directory": "packages/serve-droid"
+  },
+  "license": "SEE LICENSE IN LICENSE.md"
+}

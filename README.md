@@ -33,6 +33,13 @@ Requirements
 Quick start
 -----------
 
+With Node.js 22+ on the Docker host, start an emulator from this checkout:
+
+    npm exec --package=./packages/serve-droid -- serve-droid
+
+Open the URL it prints. The [serve-droid CLI](./packages/serve-droid) supports APK install,
+named devices, and custom ports. To build and run the image directly, follow the steps below.
+
 1. Build the image. Pick an Android version and its API level from [Android versions](#android-versions).
 
     ```
