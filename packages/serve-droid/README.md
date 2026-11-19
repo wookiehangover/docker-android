@@ -15,6 +15,13 @@ The default is a headless Samsung Galaxy S10 running Android 16. Docker picks
 a free loopback port. Progress goes to stderr. Once Android and the browser UI
 are ready, stdout contains the URL. Open it in a browser on the Docker host.
 
+To open the UI from another device, bind to the Docker host's LAN address,
+for example `serve-droid start --host 192.168.1.42 --port 6090`, then open
+`http://192.168.1.42:6090/` from that device. Use `--host 0.0.0.0` for all
+IPv4 interfaces or `--host ::` for all IPv6 interfaces. For these wildcard
+bindings the CLI prints a loopback URL for local use. To change the binding
+of a running emulator, stop it and start it again with the desired host.
+
 The launcher uses the Git root (or the working directory outside Git) to
 identify the project. Later runs reuse its emulator, including its apps and
 settings. `stop` removes the container and keeps its data in two named Docker

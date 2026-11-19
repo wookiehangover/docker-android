@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
+import { isIP } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer } from '../lib/docker.js';
@@ -15,6 +16,7 @@ Stop removes the container and keeps its Android data for the next start.
   --name NAME       Select a named emulator (default: current project)
   --device PROFILE  Device profile (default: Samsung Galaxy S10)
   --android VERSION Android version 9–17 (default: 16)
+  --host IP         Bind the browser UI to this IP address (default: 127.0.0.1)
   --port PORT       Local browser port (default: Docker picks a free port)
   --apk FILE        Install an APK after boot
   --image IMAGE     Use a compatible Docker image instead of the default build
@@ -35,7 +37,7 @@ function projectName() {
 }
 
 function checkConfig(settings, options) {
-  for (const key of ['device', 'android', 'image', 'port']) {
+  for (const key of ['device', 'android', 'image', 'host', 'port']) {
     if (options[key] !== undefined && options[key] !== settings[key]) {
       throw new Error(`This emulator uses a different --${key}. Choose another --name for the new configuration.`);
     }
@@ -73,7 +75,9 @@ function deviceVolumes(name, options) {
 function checkContainer(container, name, options) {
   checkOwner(container.Config.Labels, name);
   const settings = JSON.parse(container.Config.Labels['serve-droid.config']);
-  settings.port = container.NetworkSettings.Ports['6090/tcp']?.[0]?.HostPort ?? settings.port;
+  const binding = container.NetworkSettings.Ports['6090/tcp']?.[0];
+  settings.port = binding?.HostPort ?? settings.port;
+  settings.host = binding?.HostIp ?? settings.host ?? '127.0.0.1';
   checkConfig(settings, options);
 }
 
@@ -82,12 +86,14 @@ function createContainer(name, options) {
   const { settings, mounts } = deviceVolumes(name, options);
   const image = settings.image ?? emulatorImage(settings.android);
   const port = options.port ?? settings.port;
+  const host = options.host ?? '127.0.0.1';
+  const publishHost = isIP(host) === 6 ? `[${host}]` : host;
   docker('run', '--rm', '--user', '0', '--entrypoint', 'chown', ...mounts, image,
     '1300:1301', '/home/androidusr/emulator', '/home/androidusr/.android');
   const args = [
     'create', '--rm', '--name', `serve-droid-${name}`, '--device', '/dev/kvm',
-    '--publish', `127.0.0.1:${port ?? ''}:6090`,
-    '--label', `${owner}=${name}`, '--label', `serve-droid.config=${JSON.stringify({ ...settings, port })}`,
+    '--publish', `${publishHost}:${port ?? ''}:6090`,
+    '--label', `${owner}=${name}`, '--label', `serve-droid.config=${JSON.stringify({ ...settings, host, port })}`,
     '--env', `EMULATOR_DEVICE=${settings.device}`, '--env', 'WEB_UI=true', '--env', 'EMULATOR_HEADLESS=true',
     ...mounts,
   ];
@@ -128,7 +134,7 @@ function parseCommand() {
     options: {
       help: { type: 'boolean', short: 'h' },
       name: { type: 'string' }, device: { type: 'string' }, android: { type: 'string' },
-      port: { type: 'string' }, apk: { type: 'string' }, image: { type: 'string' },
+      host: { type: 'string' }, port: { type: 'string' }, apk: { type: 'string' }, image: { type: 'string' },
     },
   });
   if (values.help) return { command: 'help' };
@@ -140,6 +146,10 @@ function parseCommand() {
   const name = values.name ?? projectName();
   if (!/^[a-zA-Z0-9_-]{1,100}$/.test(name)) {
     throw new Error('--name must be 1–100 letters, digits, hyphens or underscores.');
+  }
+  if (values.host !== undefined) {
+    if (!isIP(values.host) || values.host.includes('%')) throw new Error('--host must be an IPv4 or IPv6 address.');
+    if (isIP(values.host) === 6) values.host = new URL(`http://[${values.host}]`).hostname.slice(1, -1);
   }
   if (values.port !== undefined && (!/^[1-9]\d{0,4}$/.test(values.port) || Number(values.port) > 65535)) {
     throw new Error('--port must be between 1 and 65535.');
@@ -198,7 +208,10 @@ async function main() {
     }
   }
   const binding = inspectContainer(id).NetworkSettings.Ports['6090/tcp'][0];
-  const url = `http://127.0.0.1:${binding.HostPort}/`;
+  let host = binding.HostIp;
+  if (host === '0.0.0.0') host = '127.0.0.1';
+  if (host === '::') host = '::1';
+  const url = `http://${isIP(host) === 6 ? `[${host}]` : host}:${binding.HostPort}/`;
   await waitForBoot(id, containerName, url);
   if (values.apk) {
     console.error(`Installing ${basename(values.apk)}…`);

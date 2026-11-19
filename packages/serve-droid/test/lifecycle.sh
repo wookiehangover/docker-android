@@ -20,7 +20,9 @@ npm pack "$package_dir" --silent >/dev/null
 npm install --no-audit --no-fund ./serve-droid-*.tgz >/dev/null
 cli=./node_modules/.bin/serve-droid
 android=${1:-16}
-url=$("$cli" --name "$name" --android "$android" --device "Samsung Galaxy S10")
+url=$("$cli" --name "$name" --android "$android" --device "Samsung Galaxy S10" --host 127.0.0.2)
+[[ "$url" == http://127.0.0.2:* ]]
+if "$cli" --name "$name" --host 127.0.0.1; then exit 1; fi
 if [[ "$android" == 17 || "$android" == 17.0 ]]; then
   docker exec "$container" sh -c 'grep -Fx target=android-37.0 ~/.android/avd/*.ini'
 fi
@@ -55,6 +57,7 @@ if "$cli" --name "$name" --device "Nexus 4"; then exit 1; fi
 "$cli" stop --name "$name"
 test -z "$(docker ps -aq --filter "name=^/${container}$")"
 url=$("$cli" --name "$name")
+[[ "$url" == http://127.0.0.1:* ]]
 installed=$(docker exec "$container" adb shell pm path dev.servedroid.smoke || true)
 if [[ "$installed" != package:* ]]; then
   echo "The installed APK is missing after restarting Android." >&2
