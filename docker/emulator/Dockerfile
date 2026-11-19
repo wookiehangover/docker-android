@@ -84,6 +84,10 @@ RUN --mount=type=secret,id=extension,dst=/tmp/extension.sh \
     bash /tmp/extension.sh
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
+# avdmanager 19 writes target=android-0 for API 37.0, which breaks app switching.
+RUN if [ "${EMULATOR_API_LEVEL}" = "37.0" ]; then sdkmanager 'cmdline-tools;22.0'; fi
+ENV PATH="${ANDROID_HOME}/cmdline-tools/22.0/bin:${PATH}"
+
 #========
 # Web UI
 #--------

@@ -110,9 +110,13 @@ Android versions
 |14.0|34||
 |15.0|35||
 |16.0|36|Recommended|
-|17.0|37.0|Unstable, see below|
+|17.0|37.0|Use a fresh virtual device with SDK command-line tools 22.0|
 
-**Android 17 is unstable with software rendering.** Its system process crashes when it reads screen pixels back, for example for the Recent apps thumbnail taken when an app goes to the background. The emulator graphics driver in the Android 17 image asserts on a feature (`hasReadColorBufferDma`) that the emulator does not provide without a GPU. The CLI switches Android 17 to three-button navigation to avoid one trigger, but the others remain. Use Android 16 until a newer emulator or system image fixes this.
+The Android 17 image installs SDK command-line tools 22.0 so new virtual devices
+get the correct `target=android-37.0`. Older images can write `target=android-0`,
+which causes Android's graphics and system processes to crash during app switching
+with software rendering. Rebuild the image and use a new device name or fresh
+volumes if your existing Android 17 device was created with the older tools.
 
 Devices
 -------
