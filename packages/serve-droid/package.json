@@ -6,7 +6,7 @@
   "bin": {
     "serve-droid": "./bin/serve-droid.js"
   },
-  "files": ["bin", "lib", "web-ui/*.py", "web-ui/*.html", "web-ui/requirements.txt", "LICENSE.md"],
+  "files": ["bin", "lib", "web-ui/*.py", "web-ui/*.html", "web-ui/requirements.txt", "web-ui/mac-requirements.txt", "web-ui/pyproject.toml", "web-ui/uv.lock", "LICENSE.md"],
   "engines": { "node": ">=22" },
   "scripts": { "test:e2e": "bash test/lifecycle.sh" },
   "repository": {

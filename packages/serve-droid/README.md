@@ -1,7 +1,7 @@
 # serve-droid
 
 Start an Android emulator for the current project and print its browser URL.
-Requires Node.js 22+. On macOS, attach to a running Android Studio emulator.
+Requires Node.js 22+. On macOS, start or reuse a native emulator.
 Container startup requires a local Linux Docker engine with access to `/dev/kvm`
 and an x86-64 host. Run from any project directory.
 
@@ -64,27 +64,28 @@ Append `-- 17` to run the same check on Android 17 and verify the virtual device
 
 ## Attach to Android Studio on macOS
 
-On macOS, running `serve-droid` defaults to `attach`. It checks for ADB and
+On macOS, `serve-droid` and `serve-droid start` both use the native `attach` launcher. It checks for ADB and
 the emulator SDK (including its controller protocol). In a terminal it offers
 to install missing packages with `sdkmanager`. If needed, it offers to use
-Homebrew for the SDK command-line tools and Java. Without either installer,
-use Android Studio's SDK Manager. Noninteractive runs print setup instructions.
-Start an ARM64 virtual device in Android Studio's Device Manager on Apple silicon. The browser UI runs locally and uses the selected emulator's gRPC
+Homebrew for the SDK command-line tools and Java. If Homebrew is missing too, the prompt includes its installation. Noninteractive runs print setup instructions.
+If no emulator is running, the launcher boots an existing AVD headlessly
+(preferring `serve-droid`, then the first name alphabetically). If no AVD exists,
+it creates `serve-droid` using an installed host-compatible image, downloading
+an Android 16 Google APIs image if needed. The browser UI runs locally and uses the selected emulator's gRPC
 endpoint for display and input and its ADB serial for APK installs and logs.
 
-From the repository root, set up a Python environment once (Python 3.10+):
+From your project directory, run:
 
 ```sh
-python3 -m venv ~/.venvs/serve-droid
-source ~/.venvs/serve-droid/bin/activate
-python -m pip install aiohttp grpcio grpcio-tools pillow 'PyJWT[crypto]>=2,<3'
+npx serve-droid
 ```
 
-With that environment active, run:
-
-```sh
-node packages/serve-droid/bin/serve-droid.js attach
-```
+The Mac launcher reuses `uv` when available. If it is missing, choose a
+project-local uv installation or use an installed Python 3.12–3.14 with pip.
+Both install the locked dependencies in `.serve-droid/.venv` (or `.venv`
+in the serve-droid package directory). Subsequent runs reuse your choice.
+For unattended setup, set `SERVE_DROID_PYTHON_SETUP=system` or
+`SERVE_DROID_PYTHON_SETUP=uv`. Without a terminal or uv, setup tries system Python.
 
 Open the printed loopback URL (default port 6090). Use
 `attach --serial emulator-5554 --port 6080` to choose among running emulators

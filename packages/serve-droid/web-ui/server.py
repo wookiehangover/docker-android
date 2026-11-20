@@ -315,7 +315,10 @@ async def index(request: web.Request) -> web.FileResponse:
 async def info(request: web.Request) -> web.Response:
     emu: Emulator = request.app["emu"]
     w, h = emu.lcd
-    return web.json_response({"label": emu.label, "width": w, "height": h, **emu.details})
+    info = {"label": emu.label, "width": w, "height": h, **emu.details}
+    if request.app.get("serial"):
+        info["serve_droid_serial"] = request.app["serial"]
+    return web.json_response(info)
 
 
 async def screenshot(request: web.Request) -> web.Response:
@@ -486,7 +489,7 @@ async def start_background(app: web.Application) -> None:
     app["tasks"] = [asyncio.create_task(emu.pump_frames()), asyncio.create_task(emu.pump_clipboard())]
 
 
-def main(metadata=None, wait_for_frame=False) -> None:
+def main(metadata=None, wait_for_frame=False, serial=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--grpc", default=os.environ.get("EMULATOR_GRPC", "localhost:8554"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("WEB_UI_PORT", "6090")))
@@ -497,6 +500,7 @@ def main(metadata=None, wait_for_frame=False) -> None:
     app = web.Application(client_max_size=MAX_APK_BYTES)
     app["emu_args"] = (args.grpc, args.label)
     app["metadata"] = metadata
+    app["serial"] = serial
     app.on_startup.append(start_background)
     if wait_for_frame:
         async def ready(app):
