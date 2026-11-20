@@ -146,11 +146,12 @@ class Logcat:
 
 
 class Emulator:
-    def __init__(self, address: str, label: str) -> None:
+    def __init__(self, address: str, label: str, metadata=None) -> None:
         self.address = address
         self.label = label or "Android Emulator"
         self.channel = None
         self.stub = None
+        self.native_metadata = metadata
         self.md = []
         self.lcd = (1080, 1920)
         self.details = {}
@@ -162,10 +163,13 @@ class Emulator:
         self.clipboard = None
         self.sockets = set()
 
+    def metadata(self, method):
+        return self.native_metadata(method) if self.native_metadata else self.md
+
     async def connect(self) -> None:
         self.connected.clear()
         while True:
-            token = discover_token()
+            token = "" if self.native_metadata else discover_token()
             if self.channel:
                 await self.channel.close()
             self.channel = grpc.aio.insecure_channel(
@@ -173,7 +177,7 @@ class Emulator:
             self.stub = rpc.EmulatorControllerStub(self.channel)
             self.md = [("authorization", f"Bearer {token}")] if token else []
             try:
-                status = await self.stub.getStatus(empty_pb2.Empty(), metadata=self.md, timeout=5)
+                status = await self.stub.getStatus(empty_pb2.Empty(), metadata=self.metadata("getStatus"), timeout=5)
             except grpc.aio.AioRpcError as e:
                 logger.info(f"waiting for emulator gRPC ({e.code().name})")
                 await asyncio.sleep(2)
@@ -216,7 +220,7 @@ class Emulator:
             edge = min(MAX_EDGE, max(self.lcd))
             fmt = pb.ImageFormat(format=pb.ImageFormat.RGB888, width=edge, height=edge)
             try:
-                async for img in self.stub.streamScreenshot(fmt, metadata=self.md):
+                async for img in self.stub.streamScreenshot(fmt, metadata=self.metadata("streamScreenshot")):
                     jpeg = await loop.run_in_executor(None, self.encode, img)
                     async with self.frame_ready:
                         self.rotation = int(img.format.rotation.rotation)
@@ -231,7 +235,7 @@ class Emulator:
         while True:
             await self.connected.wait()
             try:
-                async for clip in self.stub.streamClipboard(empty_pb2.Empty(), metadata=self.md):
+                async for clip in self.stub.streamClipboard(empty_pb2.Empty(), metadata=self.metadata("streamClipboard")):
                     if clip.text != self.clipboard:
                         self.clipboard = clip.text
                         await self.broadcast({"t": "clipboard", "text": clip.text})
@@ -250,7 +254,7 @@ class Emulator:
     async def call(self, method: str, request, timeout: float = 5):
         if not self.connected.is_set():
             raise RuntimeError("emulator is not connected")
-        return await getattr(self.stub, method)(request, metadata=self.md, timeout=timeout)
+        return await getattr(self.stub, method)(request, metadata=self.metadata(method), timeout=timeout)
 
     async def try_call(self, method: str, request) -> None:
         try:
@@ -311,7 +315,10 @@ async def index(request: web.Request) -> web.FileResponse:
 async def info(request: web.Request) -> web.Response:
     emu: Emulator = request.app["emu"]
     w, h = emu.lcd
-    return web.json_response({"label": emu.label, "width": w, "height": h, **emu.details})
+    info = {"label": emu.label, "width": w, "height": h, **emu.details}
+    if request.app.get("serial"):
+        info["serve_droid_serial"] = request.app["serial"]
+    return web.json_response(info)
 
 
 async def screenshot(request: web.Request) -> web.Response:
@@ -476,13 +483,13 @@ async def socket(request: web.Request) -> web.WebSocketResponse:
 
 
 async def start_background(app: web.Application) -> None:
-    emu = Emulator(*app["emu_args"])
+    emu = Emulator(*app["emu_args"], metadata=app["metadata"])
     app["emu"] = emu
     app["logcat"] = Logcat()
     app["tasks"] = [asyncio.create_task(emu.pump_frames()), asyncio.create_task(emu.pump_clipboard())]
 
 
-def main() -> None:
+def main(metadata=None, wait_for_frame=False, serial=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--grpc", default=os.environ.get("EMULATOR_GRPC", "localhost:8554"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("WEB_UI_PORT", "6090")))
@@ -492,7 +499,18 @@ def main() -> None:
 
     app = web.Application(client_max_size=MAX_APK_BYTES)
     app["emu_args"] = (args.grpc, args.label)
+    app["metadata"] = metadata
+    app["serial"] = serial
     app.on_startup.append(start_background)
+    if wait_for_frame:
+        async def ready(app):
+            emu = app["emu"]
+            async with emu.frame_ready:
+                try:
+                    await asyncio.wait_for(emu.frame_ready.wait_for(lambda: emu.frame is not None), 45)
+                except asyncio.TimeoutError:
+                    raise RuntimeError("Timed out waiting for the first emulator frame.")
+        app.on_startup.append(ready)
     app.add_routes([
         web.get("/", index), web.get("/info", info), web.get("/screenshot", screenshot), web.get("/ws", socket),
         web.get("/api/state", get_state), web.get("/api/foreground", get_foreground),

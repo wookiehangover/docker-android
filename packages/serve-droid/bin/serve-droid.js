@@ -2,17 +2,21 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { basename } from 'node:path';
 import { isIP } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer } from '../lib/docker.js';
 
-const help = `Usage: serve-droid [start|stop] [options]
+const help = `Usage: serve-droid [start|stop|attach] [options]
 
 Start or reuse the project's Android emulator and print its browser URL.
 Stop removes the container and keeps its Android data for the next start.
 
+  start (default)   Launch natively on macOS or with Docker/KVM on Linux
+  attach            Start or reuse a native Android emulator in the foreground
+  --serial SERIAL   Emulator to attach to (example: emulator-5554)
   --name NAME       Select a named emulator (default: current project)
   --device PROFILE  Device profile (default: Samsung Galaxy S10)
   --android VERSION Android version 9–17 (default: 16)
@@ -133,13 +137,19 @@ function parseCommand() {
     allowPositionals: true,
     options: {
       help: { type: 'boolean', short: 'h' },
+      serial: { type: 'string' },
       name: { type: 'string' }, device: { type: 'string' }, android: { type: 'string' },
       host: { type: 'string' }, port: { type: 'string' }, apk: { type: 'string' }, image: { type: 'string' },
     },
   });
   if (values.help) return { command: 'help' };
-  const [command = 'start'] = positionals;
-  if (positionals.length > 1 || !['start', 'stop'].includes(command)) throw new Error(help);
+  const [requested = 'start'] = positionals;
+  const command = requested === 'start' && process.platform === 'darwin' ? 'attach' : requested;
+  if (positionals.length > 1 || !['start', 'stop', 'attach'].includes(command)) throw new Error(help);
+  if (command === 'attach' && Object.keys(values).some(key => !['serial', 'port'].includes(key))) {
+    throw new Error('Native emulator startup accepts --serial and --port.');
+  }
+  if (command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
   if (command === 'stop' && Object.keys(values).some(key => key !== 'name')) {
     throw new Error('Only --name applies to stop.');
   }
@@ -174,6 +184,15 @@ function parseCommand() {
 async function main() {
   const { command, name, values } = parseCommand();
   if (command === 'help') return console.log(help);
+  if (command === 'attach') {
+    const script = fileURLToPath(new URL('../lib/mac-launch.sh', import.meta.url));
+    const args = [script, '--port', values.port ?? '6090'];
+    if (values.serial) args.push('--serial', values.serial);
+    const result = spawnSync('/bin/sh', args, { stdio: 'inherit' });
+    if (result.error) throw result.error;
+    process.exitCode = result.status ?? 1;
+    return;
+  }
   if (command === 'start' && !existsSync('/dev/kvm')) {
     throw new Error('Starting the emulator requires a local Linux Docker host with /dev/kvm.');
   }

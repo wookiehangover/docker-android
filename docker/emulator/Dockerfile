@@ -79,6 +79,7 @@ ENV SCRIPT_PATH="docker-android"
 ENV APP_PATH=${WORK_PATH}/${SCRIPT_PATH}
 RUN mkdir -p ${APP_PATH}
 COPY mixins ${APP_PATH}/mixins
+COPY packages/serve-droid/web-ui ${APP_PATH}/mixins/web-ui
 COPY cli ${APP_PATH}/cli
 RUN --mount=type=secret,id=extension,dst=/tmp/extension.sh \
     bash /tmp/extension.sh

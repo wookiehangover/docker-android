@@ -1,7 +1,8 @@
 # serve-droid
 
 Start an Android emulator for the current project and print its browser URL.
-Requires Node.js 22+, a local Linux Docker engine with access to `/dev/kvm`,
+Requires Node.js 22+. On macOS, start or reuse a native emulator.
+Container startup requires a local Linux Docker engine with access to `/dev/kvm`
 and an x86-64 host. Run from any project directory.
 
 ```sh
@@ -60,3 +61,34 @@ to pack and install the CLI, boot a disposable emulator, and check reuse,
 configuration conflicts, stop, and persistence after restart. The test prints
 the path to a screenshot. Set `ARTIFACT_DIR` to choose the output directory.
 Append `-- 17` to run the same check on Android 17 and verify the virtual device target.
+
+## Attach to Android Studio on macOS
+
+On macOS, `serve-droid` and `serve-droid start` both use the native `attach` launcher. It checks for ADB and
+the emulator SDK (including its controller protocol). In a terminal it offers
+to install missing packages with `sdkmanager`. If needed, it offers to use
+Homebrew for the SDK command-line tools and Java. If Homebrew is missing too, the prompt includes its installation. Noninteractive runs print setup instructions.
+If no emulator is running, the launcher boots an existing AVD headlessly
+(preferring `serve-droid`, then the first name alphabetically). If no AVD exists,
+it creates `serve-droid` using an installed host-compatible image, downloading
+an Android 16 Google APIs image if needed. The browser UI runs locally and uses the selected emulator's gRPC
+endpoint for display and input and its ADB serial for APK installs and logs.
+
+From your project directory, run:
+
+```sh
+npx serve-droid
+```
+
+The Mac launcher reuses `uv` when available. If it is missing, choose a
+project-local uv installation or use an installed Python 3.12–3.14 with pip.
+Both install the locked dependencies in `.serve-droid/.venv` (or `.venv`
+in the serve-droid package directory). Subsequent runs reuse your choice.
+For unattended setup, set `SERVE_DROID_PYTHON_SETUP=system` or
+`SERVE_DROID_PYTHON_SETUP=uv`. Without a terminal or uv, setup tries system Python.
+
+Open the printed loopback URL (default port 6090). Use
+`attach --serial emulator-5554 --port 6080` to choose among running emulators
+or change the browser port. Set `ANDROID_HOME` for SDKs outside
+`~/Library/Android/sdk`. Ctrl-C closes the browser server and leaves the
+Android Studio device running. Linux container startup still uses `serve-droid start`.
