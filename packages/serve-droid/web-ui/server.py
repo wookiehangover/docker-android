@@ -51,15 +51,15 @@ def to_panel(x: float, y: float, rotation: int):
 
 async def adb(*args: str, timeout: float = 30) -> str:
     proc = await asyncio.create_subprocess_exec(
-        "adb", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        "adb", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:
         proc.kill()
         raise RuntimeError(f"adb {args[0]} timed out")
     text = out.decode(errors="replace").strip()
     if proc.returncode != 0:
-        raise RuntimeError(text or f"adb {args[0]} failed")
+        raise RuntimeError((text + "\n" + err.decode(errors="replace")).strip() or f"adb {args[0]} failed")
     return text
 
 

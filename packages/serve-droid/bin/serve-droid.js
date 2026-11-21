@@ -2,8 +2,9 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import { isIP } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
@@ -12,11 +13,12 @@ import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer }
 const help = `Usage: serve-droid [start|stop|attach] [options]
 
 Start or reuse the project's Android emulator and print its browser URL.
-Stop removes the container and keeps its Android data for the next start.
+Stop shuts the emulator down and keeps its Android data for the next start.
 
   start (default)   Launch natively on macOS or with Docker/KVM on Linux
+  stop              Stop the project's emulator and browser UI
   attach            Start or reuse a native Android emulator in the foreground
-  --serial SERIAL   Emulator to attach to (example: emulator-5554)
+  --serial SERIAL   Native emulator to use on macOS (example: emulator-5554)
   --name NAME       Select a named emulator (default: current project)
   --device PROFILE  Device profile (default: Samsung Galaxy S10)
   --android VERSION Android version 9–17 (default: 16)
@@ -27,6 +29,7 @@ Stop removes the container and keeps its Android data for the next start.
   -h, --help        Show this help`;
 
 const owner = 'serve-droid.name';
+const mac = process.platform === 'darwin';
 const profiles = new Set([
   'Nexus 4', 'Nexus 5', 'Nexus 7', 'Nexus One', 'Nexus S', 'Pixel C', 'Pixel 8', 'Pixel 9',
   'Samsung Galaxy S6', 'Samsung Galaxy S7', 'Samsung Galaxy S7 Edge',
@@ -143,13 +146,15 @@ function parseCommand() {
     },
   });
   if (values.help) return { command: 'help' };
-  const [requested = 'start'] = positionals;
-  const command = requested === 'start' && process.platform === 'darwin' ? 'attach' : requested;
+  const [command = 'start'] = positionals;
   if (positionals.length > 1 || !['start', 'stop', 'attach'].includes(command)) throw new Error(help);
   if (command === 'attach' && Object.keys(values).some(key => !['serial', 'port'].includes(key))) {
     throw new Error('Native emulator startup accepts --serial and --port.');
   }
-  if (command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
+  if (mac && command === 'start' && Object.keys(values).some(key => !['serial', 'port', 'name', 'apk'].includes(key))) {
+    throw new Error('Native emulator startup on macOS accepts --serial, --port, --name and --apk.');
+  }
+  if (!mac && command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
   if (command === 'stop' && Object.keys(values).some(key => key !== 'name')) {
     throw new Error('Only --name applies to stop.');
   }
@@ -181,17 +186,39 @@ function parseCommand() {
   return { command, name, values };
 }
 
+function nativeLaunch(command, name, values) {
+  const script = fileURLToPath(new URL('../lib/mac-launch.sh', import.meta.url));
+  const args = [script, command, '--port', values.port ?? '6090'];
+  if (values.serial) args.push('--serial', values.serial);
+  if (command !== 'attach') args.push('--state', join(homedir(), 'Library/Caches/serve-droid', `${name}.json`));
+  const capture = command === 'start';
+  const result = spawnSync('/bin/sh', args, { stdio: ['inherit', capture ? 'pipe' : 'inherit', 'inherit'], encoding: 'utf8' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    process.exitCode = result.status ?? 1;
+    return;
+  }
+  return capture ? result.stdout.trim().split('\n').at(-1) : undefined;
+}
+
+async function installApk(url, apk) {
+  console.error(`Installing ${basename(apk)}…`);
+  const response = await fetch(`${url}api/install`, {
+    method: 'POST', body: createReadStream(apk), duplex: 'half',
+    headers: { 'content-type': 'application/octet-stream' },
+    signal: AbortSignal.timeout(240_000),
+  });
+  if (!response.ok) throw new Error(`APK install failed (${response.status}): ${await response.text()}`);
+}
+
 async function main() {
   const { command, name, values } = parseCommand();
   if (command === 'help') return console.log(help);
-  if (command === 'attach') {
-    const script = fileURLToPath(new URL('../lib/mac-launch.sh', import.meta.url));
-    const args = [script, '--port', values.port ?? '6090'];
-    if (values.serial) args.push('--serial', values.serial);
-    const result = spawnSync('/bin/sh', args, { stdio: 'inherit' });
-    if (result.error) throw result.error;
-    process.exitCode = result.status ?? 1;
-    return;
+  if (command === 'attach' || mac) {
+    const url = nativeLaunch(command, name, values);
+    if (!url) return;
+    if (values.apk) await installApk(url, values.apk);
+    return console.log(url);
   }
   if (command === 'start' && !existsSync('/dev/kvm')) {
     throw new Error('Starting the emulator requires a local Linux Docker host with /dev/kvm.');
@@ -232,15 +259,7 @@ async function main() {
   if (host === '::') host = '::1';
   const url = `http://${isIP(host) === 6 ? `[${host}]` : host}:${binding.HostPort}/`;
   await waitForBoot(id, containerName, url);
-  if (values.apk) {
-    console.error(`Installing ${basename(values.apk)}…`);
-    const response = await fetch(`${url}api/install`, {
-      method: 'POST', body: createReadStream(values.apk), duplex: 'half',
-      headers: { 'content-type': 'application/octet-stream' },
-      signal: AbortSignal.timeout(240_000),
-    });
-    if (!response.ok) throw new Error(`APK install failed (${response.status}): ${await response.text()}`);
-  }
+  if (values.apk) await installApk(url, values.apk);
   console.log(url);
 }
 
