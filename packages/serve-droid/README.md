@@ -10,6 +10,7 @@ npx serve-droid
 npx serve-droid --apk ./app-debug.apk
 npx serve-droid --name tablet --device "Pixel C" --port 6081
 npx serve-droid stop --name tablet
+npx serve-droid ls
 ```
 
 The default is a headless Samsung Galaxy S10 running Android 16. Docker picks
@@ -25,7 +26,8 @@ of a running emulator, stop it and start it again with the desired host.
 
 The launcher uses the Git root (or the working directory outside Git) to
 identify the project. Later runs reuse its emulator, including its apps and
-settings. `stop` removes the container and keeps its data in two named Docker
+settings. `ls` lists the running emulators with their URLs.
+`stop` removes the container and keeps its data in two named Docker
 volumes. A different device,
 image or port can run alongside it under another `--name`. Removing the
 two volumes (`serve-droid-<name>-data` and `serve-droid-<name>-home`) after
@@ -69,7 +71,8 @@ instead of Docker. `start` runs the browser UI in the background, prints its URL
 and returns. `stop` closes the browser UI and shuts down the emulator if `start`
 booted it, saving its Quick Boot snapshot. An emulator that was already running
 (for example from Android Studio) keeps running. Use `--name` to manage several
-projects' browser UIs separately. State and logs are in `~/Library/Caches/serve-droid`.
+projects' browser UIs separately, and `ls` to list the running ones. State and logs
+are in `~/Library/Caches/serve-droid`.
 
 The launcher checks for ADB and
 the emulator SDK (including its controller protocol). In a terminal it offers

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
@@ -10,13 +10,14 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer } from '../lib/docker.js';
 
-const help = `Usage: serve-droid [start|stop|attach] [options]
+const help = `Usage: serve-droid [start|stop|ls|attach] [options]
 
 Start or reuse the project's Android emulator and print its browser URL.
 Stop shuts the emulator down and keeps its Android data for the next start.
 
   start (default)   Launch natively on macOS or with Docker/KVM on Linux
   stop              Stop the project's emulator and browser UI
+  ls                List running emulators and their browser URLs
   attach            Start or reuse a native Android emulator in the foreground
   --serial SERIAL   Native emulator to use on macOS (example: emulator-5554)
   --name NAME       Select a named emulator (default: current project)
@@ -30,6 +31,7 @@ Stop shuts the emulator down and keeps its Android data for the next start.
 
 const owner = 'serve-droid.name';
 const mac = process.platform === 'darwin';
+const nativeState = join(homedir(), 'Library/Caches/serve-droid');
 const profiles = new Set([
   'Nexus 4', 'Nexus 5', 'Nexus 7', 'Nexus One', 'Nexus S', 'Pixel C', 'Pixel 8', 'Pixel 9',
   'Samsung Galaxy S6', 'Samsung Galaxy S7', 'Samsung Galaxy S7 Edge',
@@ -147,7 +149,11 @@ function parseCommand() {
   });
   if (values.help) return { command: 'help' };
   const [command = 'start'] = positionals;
-  if (positionals.length > 1 || !['start', 'stop', 'attach'].includes(command)) throw new Error(help);
+  if (positionals.length > 1 || !['start', 'stop', 'ls', 'attach'].includes(command)) throw new Error(help);
+  if (command === 'ls') {
+    if (Object.keys(values).length) throw new Error('ls takes no options.');
+    return { command };
+  }
   if (command === 'attach' && Object.keys(values).some(key => !['serial', 'port'].includes(key))) {
     throw new Error('Native emulator startup accepts --serial and --port.');
   }
@@ -190,7 +196,7 @@ function nativeLaunch(command, name, values) {
   const script = fileURLToPath(new URL('../lib/mac-launch.sh', import.meta.url));
   const args = [script, command, '--port', values.port ?? '6090'];
   if (values.serial) args.push('--serial', values.serial);
-  if (command !== 'attach') args.push('--state', join(homedir(), 'Library/Caches/serve-droid', `${name}.json`));
+  if (command !== 'attach') args.push('--state', join(nativeState, `${name}.json`));
   const capture = command === 'start';
   const result = spawnSync('/bin/sh', args, { stdio: ['inherit', capture ? 'pipe' : 'inherit', 'inherit'], encoding: 'utf8' });
   if (result.error) throw result.error;
@@ -211,9 +217,54 @@ async function installApk(url, apk) {
   if (!response.ok) throw new Error(`APK install failed (${response.status}): ${await response.text()}`);
 }
 
+function containerUrl(container) {
+  const binding = container.NetworkSettings.Ports['6090/tcp'][0];
+  let host = binding.HostIp;
+  if (host === '0.0.0.0') host = '127.0.0.1';
+  if (host === '::') host = '::1';
+  return `http://${isIP(host) === 6 ? `[${host}]` : host}:${binding.HostPort}/`;
+}
+
+function nativeSessions() {
+  const files = existsSync(nativeState) ? readdirSync(nativeState).filter(file => file.endsWith('.json')) : [];
+  return files.flatMap(file => {
+    let state;
+    try {
+      state = JSON.parse(readFileSync(join(nativeState, file), 'utf8'));
+    } catch {
+      return [];
+    }
+    // A stopped or crashed browser UI leaves its state file behind; skip it and any reused PID.
+    const ps = spawnSync('ps', ['-ww', '-p', String(state.pid), '-o', 'command='], { encoding: 'utf8' });
+    if (!state.pid || !ps.stdout?.includes('attach.py')) return [];
+    return [[basename(file, '.json'), `http://127.0.0.1:${state.port}/`, state.serial]];
+  });
+}
+
+function dockerSessions() {
+  const ids = docker('ps', '--quiet', '--filter', `label=${owner}`).split('\n').filter(Boolean);
+  if (!ids.length) return [];
+  return JSON.parse(docker('container', 'inspect', ...ids)).map(container => {
+    const settings = JSON.parse(container.Config.Labels['serve-droid.config'] ?? '{}');
+    const device = [settings.device, settings.android && `Android ${settings.android.replace(/\.0$/, '')}`]
+      .filter(Boolean).join(', ') || settings.image;
+    const bound = container.NetworkSettings.Ports['6090/tcp']?.length;
+    return [container.Config.Labels[owner], bound ? containerUrl(container) : '-', device];
+  });
+}
+
+function listSessions() {
+  const rows = mac ? nativeSessions() : dockerSessions();
+  if (!rows.length) return console.error('No running emulators.');
+  rows.unshift(['NAME', 'URL', 'DEVICE']);
+  const widths = rows[0].map((_, i) => Math.max(...rows.map(row => String(row[i] ?? '').length)));
+  for (const row of rows) console.log(row.map((cell, i) => String(cell ?? '').padEnd(widths[i])).join('  ').trimEnd());
+}
+
 async function main() {
   const { command, name, values } = parseCommand();
   if (command === 'help') return console.log(help);
+  if (command === 'ls') return listSessions();
   if (command === 'attach' || mac) {
     const url = nativeLaunch(command, name, values);
     if (!url) return;
@@ -253,11 +304,7 @@ async function main() {
       throw error;
     }
   }
-  const binding = inspectContainer(id).NetworkSettings.Ports['6090/tcp'][0];
-  let host = binding.HostIp;
-  if (host === '0.0.0.0') host = '127.0.0.1';
-  if (host === '::') host = '::1';
-  const url = `http://${isIP(host) === 6 ? `[${host}]` : host}:${binding.HostPort}/`;
+  const url = containerUrl(inspectContainer(id));
   await waitForBoot(id, containerName, url);
   if (values.apk) await installApk(url, values.apk);
   console.log(url);
