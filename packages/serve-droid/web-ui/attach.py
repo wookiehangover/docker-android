@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -74,9 +75,9 @@ def start_or_select(sdk, requested):
         if requested:
             if requested not in online:
                 raise ValueError(f"{requested} is not an online emulator.")
-            return requested
+            return requested, None
         if len(online) == 1:
-            return online[0]
+            return online[0], None
         if online:
             raise ValueError(f"Select an emulator with --serial: {', '.join(online)}")
 
@@ -100,7 +101,7 @@ def start_or_select(sdk, requested):
                 boot = subprocess.run([*target, "shell", "getprop", "sys.boot_completed"],
                                       capture_output=True, text=True, timeout=10)
                 if boot.stdout.strip() == "1":
-                    return serial
+                    return serial, name
             time.sleep(2)
         raise RuntimeError(f"Timed out waiting for {name} to boot. See {log}")
 
@@ -158,7 +159,8 @@ def credentials(props):
         path.unlink(missing_ok=True)
 
 
-def reuse_server(port, serial):
+def serving(port, serial):
+    """Return True if our UI for serial answers on port, False if nothing listens."""
     conn = http.client.HTTPConnection("127.0.0.1", int(port), timeout=2)
     try:
         conn.request("GET", "/info")
@@ -166,7 +168,6 @@ def reuse_server(port, serial):
         if response.status == 200:
             info = json.loads(response.read(65536))
             if isinstance(info, dict) and info.get("serve_droid_serial") == serial:
-                print(f"http://127.0.0.1:{port}/", flush=True)
                 return True
     except ConnectionRefusedError:
         return False
@@ -177,34 +178,128 @@ def reuse_server(port, serial):
     raise ValueError(f"Port {port} is in use by another service or emulator. Choose another --port.")
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--serial")
-    parser.add_argument("--port", default="6090")
-    args = parser.parse_args()
-    sdk = ensure_sdk()
+def reuse_server(port, serial):
+    if serving(port, serial):
+        print(f"http://127.0.0.1:{port}/", flush=True)
+        return True
+    return False
+
+
+def serve(sdk, serial, port):
     adb = sdk / "platform-tools/adb"
-    os.environ.update(ANDROID_HOME=str(sdk), ANDROID_SDK_ROOT=str(sdk))
-    serial = start_or_select(sdk, args.serial)
-    if reuse_server(args.port, serial):
-        return
     props = discover(serial)
-    os.environ.update(ANDROID_SERIAL=serial, ANDROID_HOME=str(sdk),
-                      PATH=f"{adb.parent}{os.pathsep}{os.environ['PATH']}")
+    os.environ.update(ANDROID_SERIAL=serial, PATH=f"{adb.parent}{os.pathsep}{os.environ['PATH']}")
     proto = sdk / "emulator/lib/emulator_controller.proto"
     with tempfile.TemporaryDirectory(prefix="serve-droid-proto-") as generated:
         subprocess.run([sys.executable, "-m", "grpc_tools.protoc", f"-I{proto.parent}",
                         f"--python_out={generated}", f"--grpc_python_out={generated}", str(proto)], check=True)
         sys.path.insert(0, generated)
         import server
-        sys.argv = [sys.argv[0], "--host", "127.0.0.1", "--port", args.port,
+        sys.argv = [sys.argv[0], "--host", "127.0.0.1", "--port", port,
                     "--grpc", f"localhost:{int(props['grpc.port'])}", "--label", props.get("avd.name", serial)]
         with credentials(props) as metadata:
             try:
                 server.main(metadata=metadata, wait_for_frame=True, serial=serial)
             except OSError as error:
-                if error.errno != errno.EADDRINUSE or not reuse_server(args.port, serial):
+                if error.errno != errno.EADDRINUSE or not reuse_server(port, serial):
                     raise
+
+
+def read_state(path):
+    try:
+        return json.loads(path.read_text())
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def owns(pid):
+    """Check that pid is still a serve-droid browser server, not a recycled PID."""
+    try:
+        command = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "command="],
+                                 capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return str(Path(__file__).resolve()) in command
+
+
+def start(sdk, serial, booted, port, state_path):
+    state = read_state(state_path)
+    if state.get("pid") and owns(state["pid"]) and state.get("port") != port:
+        raise ValueError(f"This project's browser UI runs on port {state.get('port')}. Stop it first to change --port.")
+    if state.get("serial") == serial and not booted:
+        booted = state.get("avd")
+    state.update(serial=serial, port=port, avd=booted)
+    state_path.write_text(json.dumps(state))
+    if not serving(port, serial):
+        log = state_path.with_suffix(".log")
+        print("Starting the browser UI…", file=sys.stderr, flush=True)
+        with log.open("w") as output:
+            child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "attach",
+                                      "--serial", serial, "--port", port],
+                                     start_new_session=True, stdin=subprocess.DEVNULL,
+                                     stdout=output, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + 120
+        while not serving(port, serial):
+            if child.poll() is not None:
+                raise RuntimeError(f"The browser UI exited during startup. See {log}")
+            if time.monotonic() > deadline:
+                child.terminate()
+                raise RuntimeError(f"Timed out waiting for the browser UI. See {log}")
+            time.sleep(0.5)
+        state["pid"] = child.pid
+        state_path.write_text(json.dumps(state))
+    print(f"http://127.0.0.1:{port}/", flush=True)
+
+
+def stop(sdk, state_path):
+    state = read_state(state_path)
+    if not state:
+        print("No emulator started by serve-droid for this project.", file=sys.stderr)
+        return
+    pid = state.get("pid")
+    if pid and owns(pid):
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 10
+        while owns(pid) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        if owns(pid):
+            os.kill(pid, signal.SIGKILL)
+    serial, avd = state.get("serial"), state.get("avd")
+    adb = sdk / "platform-tools/adb"
+    if avd and serial in online_emulators(adb):
+        identity = subprocess.run([adb, "-s", serial, "emu", "avd", "name"],
+                                  capture_output=True, text=True, timeout=10)
+        if avd in identity.stdout.splitlines():
+            print(f"Stopping {avd}…", file=sys.stderr, flush=True)
+            # The console kill saves the Quick Boot snapshot before exiting.
+            subprocess.run([adb, "-s", serial, "emu", "kill"], capture_output=True, timeout=30)
+            deadline = time.monotonic() + 60
+            while serial in online_emulators(adb):
+                if time.monotonic() > deadline:
+                    raise RuntimeError(f"{avd} did not shut down within 60 seconds.")
+                time.sleep(1)
+    state_path.unlink(missing_ok=True)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", nargs="?", default="attach", choices=["attach", "start", "stop"])
+    parser.add_argument("--serial")
+    parser.add_argument("--port", default="6090")
+    parser.add_argument("--state", type=Path)
+    args = parser.parse_args()
+    if args.command != "attach" and not args.state:
+        parser.error(f"{args.command} requires --state")
+    sdk = ensure_sdk()
+    os.environ.update(ANDROID_HOME=str(sdk), ANDROID_SDK_ROOT=str(sdk))
+    if args.command == "stop":
+        return stop(sdk, args.state)
+    serial, booted = start_or_select(sdk, args.serial)
+    if args.command == "start":
+        args.state.parent.mkdir(parents=True, exist_ok=True)
+        return start(sdk, serial, booted, args.port, args.state)
+    if not reuse_server(args.port, serial):
+        serve(sdk, serial, args.port)
 
 
 if __name__ == "__main__":
