@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 import { isIP } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
+import { createInterface } from 'node:readline/promises';
 import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer } from '../lib/docker.js';
 
-const help = `Usage: serve-droid [start|stop|ls|attach] [options]
+const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach] [options]
 
 Start or reuse the project's Android emulator and print its browser URL.
 Stop shuts the emulator down and keeps its Android data for the next start.
@@ -18,6 +19,8 @@ Stop shuts the emulator down and keeps its Android data for the next start.
   start (default)   Launch natively on macOS or with Docker/KVM on Linux
   stop              Stop the project's emulator and browser UI
   ls                List running emulators and their browser URLs
+  logs              Show the emulator and browser UI logs (-f to follow)
+  rm                Stop the emulator and delete its saved data (-y to skip the prompt)
   attach            Start or reuse a native Android emulator in the foreground
   --serial SERIAL   Native emulator to use on macOS (example: emulator-5554)
   --name NAME       Select a named emulator (default: current project)
@@ -134,7 +137,7 @@ async function waitForBoot(id, name, url) {
     }
     await sleep(2000);
   }
-  throw new Error(`Boot timed out. Run docker exec ${name} cat logs/device.stdout.log for details.`);
+  throw new Error(`Boot timed out. Run serve-droid logs --name ${name.replace(/^serve-droid-/, '')} for details.`);
 }
 
 function parseCommand() {
@@ -142,14 +145,14 @@ function parseCommand() {
     allowPositionals: true,
     options: {
       help: { type: 'boolean', short: 'h' },
-      serial: { type: 'string' },
+      serial: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, yes: { type: 'boolean', short: 'y' },
       name: { type: 'string' }, device: { type: 'string' }, android: { type: 'string' },
       host: { type: 'string' }, port: { type: 'string' }, apk: { type: 'string' }, image: { type: 'string' },
     },
   });
   if (values.help) return { command: 'help' };
   const [command = 'start'] = positionals;
-  if (positionals.length > 1 || !['start', 'stop', 'ls', 'attach'].includes(command)) throw new Error(help);
+  if (positionals.length > 1 || !['start', 'stop', 'ls', 'logs', 'rm', 'attach'].includes(command)) throw new Error(help);
   if (command === 'ls') {
     if (Object.keys(values).length) throw new Error('ls takes no options.');
     return { command };
@@ -161,9 +164,9 @@ function parseCommand() {
     throw new Error('Native emulator startup on macOS accepts --serial, --port, --name and --apk.');
   }
   if (!mac && command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
-  if (command === 'stop' && Object.keys(values).some(key => key !== 'name')) {
-    throw new Error('Only --name applies to stop.');
-  }
+  const only = { stop: ['name'], logs: ['name', 'follow'], rm: ['name', 'yes'] }[command];
+  const extra = Object.keys(values).filter(key => !(only ?? ['name', 'serial', 'port', 'device', 'android', 'host', 'apk', 'image']).includes(key));
+  if (extra.length) throw new Error(`--${extra[0]} does not apply to ${command}.`);
   const name = values.name ?? projectName();
   if (!/^[a-zA-Z0-9_-]{1,100}$/.test(name)) {
     throw new Error('--name must be 1–100 letters, digits, hyphens or underscores.');
@@ -261,10 +264,101 @@ function listSessions() {
   for (const row of rows) console.log(row.map((cell, i) => String(cell ?? '').padEnd(widths[i])).join('  ').trimEnd());
 }
 
+async function stopContainer(container) {
+  if (!container) return;
+  if (container.State.Running) {
+    // Let Android flush its package database and userdata before Docker stops QEMU.
+    docker('exec', container.Id, 'sh', '-c',
+      'if timeout 3 adb get-state >/dev/null 2>&1; then ' +
+      'timeout 15 adb shell svc power shutdown; timeout 25 adb wait-for-disconnect; fi; exit 0');
+    if (inspectContainer(container.Id)?.State.Running) docker('stop', container.Id);
+  }
+  if (container.State.Status === 'created') docker('rm', container.Id);
+  // Docker can return from stop before automatic removal releases the name.
+  const deadline = Date.now() + 15_000;
+  while (inspectContainer(container.Id)) {
+    if (Date.now() >= deadline) throw new Error(`Docker is still removing ${container.Name.slice(1)}.`);
+    await sleep(100);
+  }
+}
+
+function run(command, args) {
+  const result = spawnSync(command, args, { stdio: 'inherit' });
+  if (result.error) throw result.error;
+  // tail exits on Ctrl-C while following; that is a normal way to finish.
+  if (result.status && result.signal !== 'SIGINT') process.exitCode = result.status;
+}
+
+function showLogs(name, follow) {
+  const tail = follow ? ['-n', '100', '-F'] : ['-n', '+1'];
+  if (mac) {
+    const state = existsSync(join(nativeState, `${name}.json`))
+      ? JSON.parse(readFileSync(join(nativeState, `${name}.json`), 'utf8')) : {};
+    const files = [join(nativeState, `${name}.log`)];
+    // The emulator log is shared, so it only belongs to this session when serve-droid booted the emulator for it.
+    if (state.avd) files.unshift(join(nativeState, 'emulator.log'));
+    if (!files.some(file => existsSync(file))) throw new Error(`No logs for ${name}. Start it with serve-droid start.`);
+    return run('tail', [...tail, ...files.filter(file => follow || existsSync(file))]);
+  }
+  const container = inspectContainer(`serve-droid-${name}`);
+  if (!container?.State.Running) throw new Error(`${name} is not running. Its logs are removed when it stops.`);
+  checkOwner(container.Config.Labels, name);
+  // Images without the browser UI have no web_ui log.
+  run('docker', ['exec', container.Id, 'sh', '-c',
+    'cd logs && exec tail "$@" $(ls device.stdout.log web_ui.stdout.log 2>/dev/null)', 'sh', ...tail]);
+}
+
+async function confirm(question) {
+  if (!process.stdin.isTTY) throw new Error('Run rm with --yes to confirm without a terminal.');
+  const prompt = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return /^y(es)?$/i.test((await prompt.question(`${question} [y/N] `)).trim());
+  } catch (error) {
+    if (error.name === 'AbortError') return false;
+    throw error;
+  } finally {
+    prompt.close();
+  }
+}
+
+function existingVolumes(name) {
+  return [`serve-droid-${name}-home`, `serve-droid-${name}-data`].filter(volume => {
+    try {
+      checkOwner(JSON.parse(docker('volume', 'inspect', volume))[0].Labels, name);
+      return true;
+    } catch (error) {
+      if (/No such volume/i.test(error.message)) return false;
+      throw error;
+    }
+  });
+}
+
+async function remove(name, yes) {
+  if (mac) {
+    const files = [`${name}.json`, `${name}.log`].map(file => join(nativeState, file)).filter(existsSync);
+    if (!files.length) return console.error(`Nothing to remove for ${name}.`);
+    if (!yes && !await confirm(`Stop ${name} and forget its session?`)) return console.error('Cancelled.');
+    nativeLaunch('stop', name, {});
+    if (process.exitCode) return;
+    for (const file of files) rmSync(file, { force: true });
+    return console.error(`Removed ${name}. The AVD and its apps are kept; manage them in Android Studio's Device Manager.`);
+  }
+  const container = inspectContainer(`serve-droid-${name}`);
+  if (container) checkOwner(container.Config.Labels, name);
+  const volumes = existingVolumes(name);
+  if (!container && !volumes.length) return console.error(`Nothing to remove for ${name}.`);
+  if (!yes && !await confirm(`Stop ${name} and delete its apps, settings and data?`)) return console.error('Cancelled.');
+  await stopContainer(container);
+  if (volumes.length) docker('volume', 'rm', ...volumes);
+  console.error(`Removed ${name}.`);
+}
+
 async function main() {
   const { command, name, values } = parseCommand();
   if (command === 'help') return console.log(help);
   if (command === 'ls') return listSessions();
+  if (command === 'logs') return showLogs(name, values.follow);
+  if (command === 'rm') return remove(name, values.yes);
   if (command === 'attach' || mac) {
     const url = nativeLaunch(command, name, values);
     if (!url) return;
@@ -277,23 +371,7 @@ async function main() {
   const containerName = `serve-droid-${name}`;
   const container = inspectContainer(containerName);
   if (container) checkContainer(container, name, values);
-  if (command === 'stop') {
-    if (container?.State.Running) {
-      // Let Android flush its package database and userdata before Docker stops QEMU.
-      docker('exec', container.Id, 'sh', '-c',
-        'if timeout 3 adb get-state >/dev/null 2>&1; then ' +
-        'timeout 15 adb shell svc power shutdown; timeout 25 adb wait-for-disconnect; fi; exit 0');
-      if (inspectContainer(container.Id)?.State.Running) docker('stop', container.Id);
-    }
-    if (container?.State.Status === 'created') docker('rm', container.Id);
-    // Docker can return from stop before automatic removal releases the name.
-    const deadline = Date.now() + 15_000;
-    while (container && inspectContainer(container.Id)) {
-      if (Date.now() >= deadline) throw new Error(`Docker is still removing ${containerName}.`);
-      await sleep(100);
-    }
-    return;
-  }
+  if (command === 'stop') return stopContainer(container);
   const id = container?.Id ?? createContainer(name, values);
   if (!container?.State.Running) {
     try {
