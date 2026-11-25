@@ -139,15 +139,15 @@ try {
   const rotated = await must("get_screen", { max_edge: 640 });
   assert.ok(rotated.width > rotated.height);
   writeFileSync(join(artifact, "get_screen-rotated.jpg"), Buffer.from(rotated.data, "base64"));
-  const icon = findNode(tree, /^(Chrome|Messages|Phone|Gmail|Camera)$/);
-  assert.ok(icon, "a launcher icon in the rotated tree");
+  const icon = findNode(tree, /^Phone$/);
+  assert.ok(icon, "Phone icon in the rotated tree");
   await must("tap", { x: icon.center[0], y: icon.center[1] });
   fg = null;
-  for (let i = 0; i < 10 && (!fg || /launcher/.test(fg)); i++) {
+  for (let i = 0; i < 10 && fg !== "com.google.android.dialer"; i++) {
     await sleep(700);
     fg = (await must("get_device_info")).foregroundPackage;
   }
-  assert.ok(fg && !/launcher/.test(fg), `rotated tap on ${icon.description || icon.text} opened an app`);
+  assert.equal(fg, "com.google.android.dialer", "rotated tap on Phone opened the dialer");
   await page.screenshot({ path: join(artifact, "page-rotated.png") });
   console.error("WebMCP E2E passed");
 } finally {

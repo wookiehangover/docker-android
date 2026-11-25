@@ -964,7 +964,7 @@
         title: "Get device info",
         description: "Device model, Android version, screen size, the foreground app, and battery, location, dark mode and clipboard state.",
         inputSchema: { type: "object", properties: {} },
-        annotations: { readOnlyHint: true },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
         execute: async () => {
           const [info, state, fg, [w, h]] = await Promise.all([fetch("info").then((r) => r.json()), call("api/state"), call("api/foreground"), oriented()]);
           return { ...info, screenWidth: w, screenHeight: h, foregroundPackage: fg.package, ...state };
