@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 (2026-11-25)
+
+### Features
+
+- Explain how to fix a missing /dev/kvm ([#6](https://github.com/wookiehangover/docker-android/pull/6))
+- Register WebMCP tools for in-browser agents ([#5](https://github.com/wookiehangover/docker-android/pull/5))
+- Add ls, logs and rm commands ([#4](https://github.com/wookiehangover/docker-android/pull/4))
+
 ## 0.3.1 (2026-11-23)
 
 ### Features

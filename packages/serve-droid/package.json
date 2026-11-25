@@ -1,6 +1,6 @@
 {
   "name": "serve-droid",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Start a Dockerized Android emulator and use it in your browser",
   "type": "module",
   "bin": {
