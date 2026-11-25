@@ -10,6 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline/promises';
 import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer } from '../lib/docker.js';
+import { kvmHelp } from '../lib/kvm.js';
 
 const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach] [options]
 
@@ -366,7 +367,7 @@ async function main() {
     return console.log(url);
   }
   if (command === 'start' && !existsSync('/dev/kvm')) {
-    throw new Error('Starting the emulator requires a local Linux Docker host with /dev/kvm.');
+    throw new Error(kvmHelp());
   }
   const containerName = `serve-droid-${name}`;
   const container = inspectContainer(containerName);
