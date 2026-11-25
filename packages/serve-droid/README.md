@@ -67,6 +67,22 @@ configuration conflicts, stop, and persistence after restart. The test prints
 the path to a screenshot. Set `ARTIFACT_DIR` to choose the output directory.
 Append `-- 17` to run the same check on Android 17 and verify the virtual device target.
 
+## Release
+
+On an up-to-date `master`, run:
+
+```sh
+npm --prefix packages/serve-droid run release -- --dry-run   # preview
+npm --prefix packages/serve-droid run release                # or: -- patch|minor|major|1.2.3
+git push --atomic origin master serve-droid-vX.Y.Z
+npm publish ./packages/serve-droid
+```
+
+The script picks the version from the commit types since the last release,
+adds a section to [CHANGELOG.md](./CHANGELOG.md), points the Linux emulator
+image at the released source, then commits and tags `serve-droid-vX.Y.Z`.
+Pushing the tag creates the GitHub release.
+
 ## WebMCP tools for browser agents
 
 The browser UI registers [WebMCP](https://webmachinelearning.github.io/webmcp/)
