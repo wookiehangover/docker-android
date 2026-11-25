@@ -93,6 +93,8 @@ def check_acceleration(emulator):
         return
     lines = [line.strip() for line in result.stdout.splitlines()]
     detail = " ".join(line for line in lines if line and line not in ("accel", "accel:") and not line.isdigit())
+    if detail and not detail.endswith("."):
+        detail += "."
     fix = {
         "win32": "Turn on Windows Hypervisor Platform in Windows Features, then restart Windows.",
         "linux": "Make sure /dev/kvm exists and your user can open it.",
