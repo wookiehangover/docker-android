@@ -1,7 +1,7 @@
 # serve-droid
 
 Start an Android emulator for the current project and print its browser URL.
-Requires Node.js 22+. On macOS, start, reuse and stop a native emulator.
+Requires Node.js 22+. On macOS and Windows, start, reuse and stop a native emulator.
 Container startup requires a local Linux Docker engine with access to `/dev/kvm`
 and an x86-64 host. Run from any project directory.
 
@@ -101,9 +101,9 @@ To check the tools against a running emulator, run
 It drives the device through each tool and prints a directory with a log of
 every call and screenshots.
 
-## Native emulators on macOS
+## Native emulators on macOS and Windows
 
-On macOS, `serve-droid start` and `serve-droid stop` manage a native emulator
+On macOS and Windows, `serve-droid start` and `serve-droid stop` manage a native emulator
 instead of Docker. `start` runs the browser UI in the background, prints its URL
 and returns. `stop` closes the browser UI and shuts down the emulator if `start`
 booted it, saving its Quick Boot snapshot. An emulator that was already running
@@ -112,12 +112,15 @@ projects' browser UIs separately, and `ls` to list the running ones. `logs` show
 the browser UI log, plus the emulator log when `start` booted the emulator.
 `rm` stops the session and deletes its state and log. It keeps the AVD and its
 apps, which all projects share; manage them in Android Studio's Device Manager.
-State and logs are in `~/Library/Caches/serve-droid`.
+State and logs are in `~/Library/Caches/serve-droid` on macOS and
+`%LOCALAPPDATA%\serve-droid` on Windows.
 
 The launcher checks for ADB and
 the emulator SDK (including its controller protocol). In a terminal it offers
 to install missing packages with `sdkmanager`. If needed, it offers to use
-Homebrew for the SDK command-line tools and Java. If Homebrew is missing too, the prompt includes its installation. Noninteractive runs print setup instructions.
+Homebrew for the SDK command-line tools and Java on macOS. If Homebrew is missing too, the prompt includes its installation. On Windows, install
+Android Studio (it includes the SDK and Java) and turn on Windows Hypervisor
+Platform in Windows Features. Noninteractive runs print setup instructions.
 If no emulator is running, the launcher boots an existing AVD headlessly
 (preferring `serve-droid`, then the first name alphabetically). If no AVD exists,
 it creates `serve-droid` using an installed host-compatible image, downloading
@@ -130,7 +133,7 @@ From your project directory, run:
 npx serve-droid
 ```
 
-The Mac launcher reuses `uv` when available. If it is missing, choose a
+The launcher reuses `uv` when available. If it is missing, choose a
 project-local uv installation or use an installed Python 3.12–3.14 with pip.
 Both install the locked dependencies in `.serve-droid/.venv` (or `.venv`
 in the serve-droid package directory). Subsequent runs reuse your choice.
@@ -140,7 +143,8 @@ For unattended setup, set `SERVE_DROID_PYTHON_SETUP=system` or
 Open the printed loopback URL (default port 6090). Use
 `--serial emulator-5554 --port 6080` to choose among running emulators
 or change the browser port, and `--apk FILE` to install an APK after startup.
-Set `ANDROID_HOME` for SDKs outside `~/Library/Android/sdk`.
+Set `ANDROID_HOME` for SDKs outside `~/Library/Android/sdk` (macOS) or
+`%LOCALAPPDATA%\Android\Sdk` (Windows).
 
 `serve-droid attach` runs the browser UI in the foreground instead. Ctrl-C
 closes it and leaves the device running.

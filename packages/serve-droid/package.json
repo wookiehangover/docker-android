@@ -12,7 +12,7 @@
     "web-ui/*.py",
     "web-ui/*.html",
     "web-ui/requirements.txt",
-    "web-ui/mac-requirements.txt",
+    "web-ui/native-requirements.txt",
     "web-ui/pyproject.toml",
     "web-ui/uv.lock",
     "LICENSE.md",

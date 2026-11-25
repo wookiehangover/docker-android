@@ -6,25 +6,61 @@ import subprocess
 import sys
 import tempfile
 
+WINDOWS = sys.platform == "win32"
+EXE = ".exe" if WINDOWS else ""
+SCRIPT = ".bat" if WINDOWS else ""
+
 
 def executable(path):
     return path.is_file() and os.access(path, os.X_OK)
 
 
+def adb_path(root):
+    return root / "platform-tools" / f"adb{EXE}"
+
+
+def emulator_path(root):
+    return root / "emulator" / f"emulator{EXE}"
+
+
+def run_tool(args, **kwargs):
+    """Run an SDK tool. cmd.exe splits unquoted batch arguments at semicolons."""
+    if WINDOWS and str(args[0]).lower().endswith(".bat"):
+        args = " ".join(f'"{arg}"' for arg in args)
+    return subprocess.run(args, **kwargs)
+
+
 def missing_packages(root):
     missing = []
-    if not executable(root / "platform-tools/adb"):
+    if not executable(adb_path(root)):
         missing.append("platform-tools")
-    if not executable(root / "emulator/emulator") or not (root / "emulator/lib/emulator_controller.proto").is_file():
+    if not executable(emulator_path(root)) or not (root / "emulator/lib/emulator_controller.proto").is_file():
         missing.append("emulator")
     return missing
+
+
+def default_sdk():
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Android/sdk"
+    if WINDOWS:
+        return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "Android/Sdk"
+    return Path.home() / "Android/Sdk"
+
+
+def studio_java():
+    """Android Studio bundles a JDK even when the system has no Java runtime."""
+    if sys.platform == "darwin":
+        return Path("/Applications/Android Studio.app/Contents/jbr/Contents/Home")
+    if WINDOWS:
+        return Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Android/Android Studio/jbr"
+    return Path("/opt/android-studio/jbr")
 
 
 def sdk_root():
     configured = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
     if configured:
         return Path(configured).expanduser()
-    default = Path.home() / "Library/Android/sdk"
+    default = default_sdk()
     roots = [default]
     for binary, directory in [("adb", "platform-tools"), ("emulator", "emulator")]:
         found = shutil.which(binary)
@@ -36,8 +72,8 @@ def sdk_root():
 
 
 def sdk_manager(root):
-    candidates = [root / "cmdline-tools/latest/bin/sdkmanager"]
-    candidates.extend(sorted(root.glob("cmdline-tools/*/bin/sdkmanager"), reverse=True))
+    candidates = [root / f"cmdline-tools/latest/bin/sdkmanager{SCRIPT}"]
+    candidates.extend(sorted(root.glob(f"cmdline-tools/*/bin/sdkmanager{SCRIPT}"), reverse=True))
     return next((str(path) for path in candidates if executable(path)), shutil.which("sdkmanager"))
 
 
@@ -57,12 +93,11 @@ def ensure_sdk(require_manager=False):
     manual = f'Install {packages} in Android Studio’s SDK Manager or set ANDROID_HOME to a complete SDK.'
 
     env = os.environ.copy()
-    # Android Studio bundles a JDK even when macOS has no system Java runtime.
-    studio_java = Path("/Applications/Android Studio.app/Contents/jbr/Contents/Home")
-    if not env.get("JAVA_HOME") and executable(studio_java / "bin/java"):
-        env["JAVA_HOME"] = str(studio_java)
-        os.environ["JAVA_HOME"] = str(studio_java)
-    java = str(Path(env["JAVA_HOME"]) / "bin/java") if env.get("JAVA_HOME") else shutil.which("java")
+    studio = studio_java()
+    if not env.get("JAVA_HOME") and executable(studio / f"bin/java{EXE}"):
+        env["JAVA_HOME"] = str(studio)
+        os.environ["JAVA_HOME"] = str(studio)
+    java = str(Path(env["JAVA_HOME"]) / f"bin/java{EXE}") if env.get("JAVA_HOME") else shutil.which("java")
     needs_java = not java or not executable(Path(java)) or subprocess.run(
         [java, "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
     casks = []
@@ -72,7 +107,12 @@ def ensure_sdk(require_manager=False):
         casks.append("temurin")
     if not missing and not casks:
         return root
-    if sys.platform != "darwin" or not sys.stdin.isatty():
+    if casks and sys.platform != "darwin":
+        needed = {"android-commandlinetools": "Android SDK Command-line Tools (Android Studio > SDK Manager > SDK Tools)",
+                  "temurin": "Java 17 or newer"}
+        raise ValueError(f"Install {' and '.join(needed[cask] for cask in casks)}, "
+                         "or set ANDROID_HOME to a complete SDK.")
+    if not sys.stdin.isatty():
         raise ValueError(manual if missing else "Run serve-droid in a terminal to install Android command-line tools and Java.")
     if missing:
         print(f"Missing Android SDK packages in {root}: {packages}.", file=sys.stderr)
@@ -102,7 +142,7 @@ def ensure_sdk(require_manager=False):
         env.pop("JAVA_HOME", None)
         os.environ.pop("JAVA_HOME", None)
     if missing:
-        subprocess.run([manager, f"--sdk_root={root}", *missing], check=True, env=env)
+        run_tool([manager, f"--sdk_root={root}", *missing], check=True, env=env)
     if missing_packages(root):
         raise ValueError(f"SDK setup is incomplete. {manual}")
     return root

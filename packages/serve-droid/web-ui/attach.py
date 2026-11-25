@@ -2,7 +2,6 @@
 import argparse
 from contextlib import contextmanager
 import errno
-import fcntl
 import http.client
 import json
 import os
@@ -16,7 +15,89 @@ import tempfile
 import time
 import uuid
 
-from android_sdk import ensure_sdk, sdk_manager
+from android_sdk import SCRIPT, WINDOWS, adb_path, emulator_path, ensure_sdk, run_tool, sdk_manager
+
+
+def state_dir():
+    if os.environ.get("SERVE_DROID_HOME"):
+        return Path(os.environ["SERVE_DROID_HOME"])
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Caches/serve-droid"
+    if WINDOWS:
+        return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "serve-droid"
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "serve-droid"
+
+
+def detached():
+    """Popen options that keep a child running after this terminal closes."""
+    if WINDOWS:
+        # A hidden console, so adb calls from the child do not open windows.
+        return {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+@contextmanager
+def exclusive(path):
+    with path.open("a+") as lock:
+        try:
+            if WINDOWS:
+                import msvcrt
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise RuntimeError("Another serve-droid process is setting up the emulator. "
+                               "Check its terminal for an SDK license prompt or boot progress.") from None
+        yield
+
+
+def alive(pid):
+    if WINDOWS:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        try:
+            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
+def command_line(pid):
+    if WINDOWS:
+        args = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"]
+    else:
+        args = ["ps", "-ww", "-p", str(pid), "-o", "command="]
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def check_acceleration(emulator):
+    try:
+        result = subprocess.run([emulator, "-accel-check"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return
+    if result.returncode == 0:
+        return
+    lines = [line.strip() for line in result.stdout.splitlines()]
+    detail = " ".join(line for line in lines if line and line not in ("accel", "accel:") and not line.isdigit())
+    fix = {
+        "win32": "Turn on Windows Hypervisor Platform in Windows Features, then restart Windows.",
+        "linux": "Make sure /dev/kvm exists and your user can open it.",
+    }.get(sys.platform, "")
+    raise RuntimeError(" ".join(part for part in ["The emulator cannot use hardware acceleration.", detail, fix] if part))
 
 
 def online_emulators(adb):
@@ -32,17 +113,17 @@ def choose_avd(sdk, emulator):
     if names:
         return sorted(names)[0]
 
-    abi = "arm64-v8a" if platform.machine() == "arm64" else "x86_64"
+    abi = "arm64-v8a" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
     images = list((sdk / "system-images").glob(f"android-*/*/{abi}/system.img"))
     ensure_sdk(require_manager=True)
     manager = sdk_manager(sdk)
     # avdmanager resolves the SDK relative to its own installation, even when
     # ANDROID_HOME points at the SDK that owns the selected system image.
-    avdmanager = Path(manager).resolve().with_name("avdmanager")
+    avdmanager = Path(manager).resolve().with_name(f"avdmanager{SCRIPT}")
     if not avdmanager.is_relative_to(sdk.resolve()):
         print(f"Installing Android command-line tools in {sdk}…", file=sys.stderr, flush=True)
-        subprocess.run([manager, f"--sdk_root={sdk}", "cmdline-tools;latest"], check=True)
-        avdmanager = sdk / "cmdline-tools/latest/bin/avdmanager"
+        run_tool([manager, f"--sdk_root={sdk}", "cmdline-tools;latest"], check=True)
+        avdmanager = sdk / f"cmdline-tools/latest/bin/avdmanager{SCRIPT}"
         if not avdmanager.is_file():
             raise ValueError(f"SDK Manager did not install command-line tools in {sdk}.")
     if images:
@@ -51,25 +132,20 @@ def choose_avd(sdk, emulator):
     else:
         package = f"system-images;android-36;google_apis;{abi}"
         print(f"Installing {package} for the first virtual device…", file=sys.stderr, flush=True)
-        subprocess.run([manager, f"--sdk_root={sdk}", package], check=True)
+        run_tool([manager, f"--sdk_root={sdk}", package], check=True)
         if not (sdk.joinpath(*package.split(";")) / "system.img").is_file():
             raise ValueError(f"SDK Manager did not install {package}. Check the license and download output above.")
     print(f"Creating virtual device {name}…", file=sys.stderr, flush=True)
-    subprocess.run([avdmanager, "create", "avd", "--name", name, "--package", package],
-                   input="no\n", text=True, check=True)
+    run_tool([avdmanager, "create", "avd", "--name", name, "--package", package],
+             input="no\n", text=True, check=True)
     return name
 
 
 def start_or_select(sdk, requested):
-    adb = sdk / "platform-tools/adb"
-    state = Path.home() / "Library/Caches/serve-droid"
+    adb = adb_path(sdk)
+    state = state_dir()
     state.mkdir(parents=True, exist_ok=True)
-    with (state / "startup.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise RuntimeError("Another serve-droid process is setting up the emulator. "
-                               "Check its terminal for an SDK license prompt or boot progress.") from None
+    with exclusive(state / "startup.lock"):
         print("Checking for a running Android emulator…", file=sys.stderr, flush=True)
         online = online_emulators(adb)
         if requested:
@@ -81,14 +157,15 @@ def start_or_select(sdk, requested):
         if online:
             raise ValueError(f"Select an emulator with --serial: {', '.join(online)}")
 
-        emulator = sdk / "emulator/emulator"
+        emulator = emulator_path(sdk)
+        if sys.platform != "darwin":
+            check_acceleration(emulator)
         name = choose_avd(sdk, emulator)
         print(f"Starting {name} and waiting for Android…", file=sys.stderr, flush=True)
         log = state / "emulator.log"
         with log.open("w") as output:
-            child = subprocess.Popen([emulator, "-avd", name, "-no-window", "-no-audio"],
-                                     start_new_session=True, stdin=subprocess.DEVNULL,
-                                     stdout=output, stderr=subprocess.STDOUT)
+            child = subprocess.Popen([emulator, "-avd", name, "-no-window", "-no-audio"], **detached(),
+                                     stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
             if child.poll() is not None:
@@ -109,17 +186,19 @@ def start_or_select(sdk, requested):
 def discover(serial):
     roots = [Path.home() / "Library/Caches/TemporaryItems", Path.home() / "Library/Caches/Google/AndroidEmulator",
              Path(tempfile.gettempdir()), Path.home() / ".android"]
-    if os.environ.get("ANDROID_EMULATOR_HOME"):
-        roots.insert(0, Path(os.environ["ANDROID_EMULATOR_HOME"]))
+    for variable in ("XDG_RUNTIME_DIR", "ANDROID_EMULATOR_HOME"):
+        if os.environ.get(variable):
+            roots.insert(0, Path(os.environ[variable]))
     for root in roots:
         for path in (root / "avd/running").glob("pid_*.ini"):
             match = re.fullmatch(r"pid_(\d+)(?:_info)?\.ini", path.name)
             if not match:
                 continue
+            if not alive(int(match[1])):
+                continue
             try:
-                os.kill(int(match[1]), 0)
                 props = dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
-            except (FileNotFoundError, ProcessLookupError, PermissionError):
+            except FileNotFoundError:
                 continue
             if f"emulator-{props.get('port.serial')}" == serial and props.get("grpc.port"):
                 return props
@@ -161,7 +240,8 @@ def credentials(props):
 
 def serving(port, serial):
     """Return True if our UI for serial answers on port, False if nothing listens."""
-    conn = http.client.HTTPConnection("127.0.0.1", int(port), timeout=2)
+    # Windows retries refused loopback connections for about two seconds.
+    conn = http.client.HTTPConnection("127.0.0.1", int(port), timeout=5)
     try:
         conn.request("GET", "/info")
         response = conn.getresponse()
@@ -186,7 +266,7 @@ def reuse_server(port, serial):
 
 
 def serve(sdk, serial, port):
-    adb = sdk / "platform-tools/adb"
+    adb = adb_path(sdk)
     props = discover(serial)
     os.environ.update(ANDROID_SERIAL=serial, PATH=f"{adb.parent}{os.pathsep}{os.environ['PATH']}")
     proto = sdk / "emulator/lib/emulator_controller.proto"
@@ -214,12 +294,7 @@ def read_state(path):
 
 def owns(pid):
     """Check that pid is still a serve-droid browser server, not a recycled PID."""
-    try:
-        command = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "command="],
-                                 capture_output=True, text=True, timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return str(Path(__file__).resolve()) in command
+    return str(Path(__file__).resolve()) in command_line(pid)
 
 
 def start(sdk, serial, booted, port, state_path):
@@ -235,9 +310,8 @@ def start(sdk, serial, booted, port, state_path):
         print("Starting the browser UI…", file=sys.stderr, flush=True)
         with log.open("w") as output:
             child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "attach",
-                                      "--serial", serial, "--port", port],
-                                     start_new_session=True, stdin=subprocess.DEVNULL,
-                                     stdout=output, stderr=subprocess.STDOUT)
+                                      "--serial", serial, "--port", port], **detached(),
+                                     stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + 120
         while not serving(port, serial):
             if child.poll() is not None:
@@ -263,9 +337,9 @@ def stop(sdk, state_path):
         while owns(pid) and time.monotonic() < deadline:
             time.sleep(0.2)
         if owns(pid):
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
     serial, avd = state.get("serial"), state.get("avd")
-    adb = sdk / "platform-tools/adb"
+    adb = adb_path(sdk)
     if avd and serial in online_emulators(adb):
         identity = subprocess.run([adb, "-s", serial, "emu", "avd", "name"],
                                   capture_output=True, text=True, timeout=10)
