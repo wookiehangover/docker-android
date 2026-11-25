@@ -2,6 +2,7 @@
 """Browser UI for the Android emulator, driven by the emulator's gRPC API."""
 import argparse
 import asyncio
+import base64
 import glob
 import io
 import json
@@ -11,7 +12,10 @@ import re
 import shlex
 import sys
 import tempfile
+import uuid
 from collections import deque
+from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 import grpc
 from aiohttp import web, WSMsgType
@@ -67,6 +71,7 @@ async def adb_shell(command: str, timeout: float = 30) -> str:
     return await adb("shell", command, timeout=timeout)
 
 
+LOGCAT_LEVELS = "VDIWEFA"
 LOGCAT_LINE = re.compile(
     r"^(\d\d-\d\d \d\d:\d\d:\d\d\.\d+)\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+(.*?)\s*: (.*)$")
 
@@ -262,22 +267,30 @@ class Emulator:
         except (grpc.aio.AioRpcError, RuntimeError) as e:
             logger.warning(f"{method} failed: {e}")
 
-    async def touch(self, x: float, y: float, down: bool) -> None:
+    async def send(self, method: str, request, strict: bool) -> None:
+        """Strict callers (the HTTP API) get errors; the live socket logs them and carries on."""
+        await (self.call(method, request) if strict else self.try_call(method, request))
+
+    async def touch(self, x: float, y: float, down: bool, strict: bool = False) -> None:
         w, h = self.lcd
         px, py = to_panel(x, y, self.rotation)
         touch = pb.Touch(x=round(px * (w - 1)), y=round(py * (h - 1)), identifier=1, pressure=1 if down else 0)
-        await self.try_call("sendTouch", pb.TouchEvent(touches=[touch]))
+        await self.send("sendTouch", pb.TouchEvent(touches=[touch]), strict)
 
-    async def key(self, key: str) -> None:
-        await self.try_call("sendKey", pb.KeyboardEvent(eventType=pb.KeyboardEvent.keypress, key=key))
+    def display_size(self, rotation=None):
+        w, h = self.lcd
+        return (h, w) if (self.rotation if rotation is None else rotation) % 2 else (w, h)
 
-    async def text(self, text: str) -> None:
-        await self.try_call("sendKey", pb.KeyboardEvent(text=text))
+    async def key(self, key: str, strict: bool = False) -> None:
+        await self.send("sendKey", pb.KeyboardEvent(eventType=pb.KeyboardEvent.keypress, key=key), strict)
 
-    async def rotate(self) -> None:
+    async def text(self, text: str, strict: bool = False) -> None:
+        await self.send("sendKey", pb.KeyboardEvent(text=text), strict)
+
+    async def rotate(self, strict: bool = False) -> None:
         angle = {0: 90, 1: 180, 2: 270, 3: 0}[self.rotation]
-        await self.try_call("setPhysicalModel", pb.PhysicalModelValue(
-            target=pb.PhysicalModelValue.ROTATION, value=pb.ParameterValue(data=[0, 0, angle])))
+        await self.send("setPhysicalModel", pb.PhysicalModelValue(
+            target=pb.PhysicalModelValue.ROTATION, value=pb.ParameterValue(data=[0, 0, angle])), strict)
 
     async def screenshot(self) -> bytes:
         img = await self.call("getScreenshot", pb.ImageFormat(format=pb.ImageFormat.PNG), timeout=10)
@@ -329,8 +342,19 @@ async def screenshot(request: web.Request) -> web.Response:
     return web.Response(body=png, content_type="image/png")
 
 
+def cross_site(request: web.Request) -> bool:
+    """True for browser requests from another site. Non-browser clients send neither header."""
+    site = request.headers.get("Sec-Fetch-Site")
+    if site:
+        return site not in ("same-origin", "none")
+    origin = request.headers.get("Origin")
+    return bool(origin) and urlsplit(origin).netloc != request.host
+
+
 def api(handler):
     async def wrapped(request: web.Request) -> web.Response:
+        if request.method != "GET" and cross_site(request):
+            return web.json_response({"ok": False, "error": "cross-site request refused"}, status=403)
         try:
             body = await request.json() if request.method == "POST" and request.can_read_body \
                 and request.content_type == "application/json" else {}
@@ -426,7 +450,172 @@ async def get_foreground(emu: Emulator, body: dict, request: web.Request):
     return {"package": package or None, "pids": pids}
 
 
+def device_point(emu: Emulator, x, y):
+    """Normalize a pixel point in the current orientation, as used by screenshots and the UI tree."""
+    w, h = emu.display_size()
+    x, y = float(x), float(y)
+    if not (0 <= x < w and 0 <= y < h):
+        raise ValueError(f"point ({x:g}, {y:g}) is outside the {w}x{h} screen")
+    return x / (w - 1), y / (h - 1)
+
+
+@api
+async def post_tap(emu: Emulator, body: dict, request: web.Request):
+    x, y = device_point(emu, body["x"], body["y"])
+    hold = max(40, min(5000, int(body.get("duration_ms", 60))))
+    await emu.touch(x, y, True, strict=True)
+    await asyncio.sleep(hold / 1000)
+    await emu.touch(x, y, False, strict=True)
+
+
+@api
+async def post_swipe(emu: Emulator, body: dict, request: web.Request):
+    x1, y1 = device_point(emu, body["x1"], body["y1"])
+    x2, y2 = device_point(emu, body["x2"], body["y2"])
+    duration = max(50, min(5000, int(body.get("duration_ms", 300))))
+    steps = max(2, duration // 16)
+    for i in range(steps + 1):
+        t = i / steps
+        await emu.touch(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, True, strict=True)
+        await asyncio.sleep(duration / 1000 / steps)
+    await emu.touch(x2, y2, False, strict=True)
+
+
+@api
+async def post_key(emu: Emulator, body: dict, request: web.Request):
+    key = str(body["key"])
+    if not key:
+        raise ValueError("key is empty")
+    await emu.key(key, strict=True)
+
+
+@api
+async def post_text(emu: Emulator, body: dict, request: web.Request):
+    await emu.text(str(body["text"]), strict=True)
+
+
+@api
+async def post_rotate(emu: Emulator, body: dict, request: web.Request):
+    await emu.rotate(strict=True)
+
+
+@api
+async def get_frame(emu: Emulator, body: dict, request: web.Request):
+    if not emu.frame:
+        raise RuntimeError("no frame yet")
+    jpeg, w, h, rotation = emu.frame
+    edge = max(160, min(MAX_EDGE, int(request.query.get("max_edge", 768))))
+    if max(w, h) > edge:
+        def shrink():
+            im = Image.open(io.BytesIO(jpeg))
+            im.thumbnail((edge, edge))
+            out = io.BytesIO()
+            im.save(out, "JPEG", quality=70)
+            return out.getvalue(), im.width, im.height
+        jpeg, w, h = await asyncio.get_running_loop().run_in_executor(None, shrink)
+    dw, dh = emu.display_size(rotation)
+    return {"mimeType": "image/jpeg", "width": w, "height": h, "screenWidth": dw, "screenHeight": dh,
+            "data": base64.b64encode(jpeg).decode()}
+
+
+UI_DUMP_LOCK = asyncio.Lock()
+BOUNDS = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
+UI_FLAGS = ("clickable", "long-clickable", "scrollable", "checkable", "checked", "focused", "selected")
+
+
+def compact_ui_tree(xml: str, panel, frame_rotation: int, frame_size) -> list:
+    """Keep only nodes an agent can read or act on, with bounds and center in screen pixels.
+
+    uiautomator reports Android's logical orientation, which differs from the frame when the device
+    is rotated but the app stays upright, so map bounds into frame pixels to match screenshots and taps.
+    """
+    root = ElementTree.fromstring(xml)
+    rotation = int(root.get("rotation", 0)) % 4
+    lw, lh = (panel[1], panel[0]) if rotation % 2 else panel
+    fw, fh = frame_size
+    turn = (rotation - frame_rotation) % 4
+
+    def to_frame(x, y):
+        fx, fy = to_panel(x / lw, y / lh, turn)
+        return round(fx * fw), round(fy * fh)
+
+    nodes = []
+    for el in root.iter("node"):
+        a = el.attrib
+        flags = [f for f in UI_FLAGS if a.get(f) == "true"]
+        if a.get("class", "").endswith("EditText"):
+            flags.append("editable")
+        if a.get("enabled") == "false":
+            flags.append("disabled")
+        text, desc = a.get("text", "")[:200], a.get("content-desc", "")[:200]
+        rid = a.get("resource-id", "").split(":id/")[-1]
+        m = BOUNDS.match(a.get("bounds", ""))
+        if not m or not (text or desc or rid or set(flags) & {"clickable", "long-clickable", "scrollable", "editable"}):
+            continue
+        x1, y1, x2, y2 = map(int, m.groups())
+        if x2 <= x1 or y2 <= y1:
+            continue
+        (ax, ay), (bx, by) = to_frame(x1, y1), to_frame(x2, y2)
+        x1, y1, x2, y2 = min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)
+        node = {"class": a.get("class", "").rsplit(".", 1)[-1], "bounds": [x1, y1, x2, y2],
+                "center": [(x1 + x2) // 2, (y1 + y2) // 2]}
+        for k, v in (("text", text), ("description", desc), ("id", rid), ("package", a.get("package"))):
+            if v:
+                node[k] = v
+        if flags:
+            node["flags"] = flags
+        nodes.append(node)
+    return nodes
+
+
+@api
+async def get_ui_tree(emu: Emulator, body: dict, request: web.Request):
+    path = f"/data/local/tmp/serve-droid-ui-{uuid.uuid4().hex}.xml"
+    out = ""
+    for _ in range(3):
+        async with UI_DUMP_LOCK:
+            out = await adb_shell(f"uiautomator dump {path} >/dev/null 2>&1; cat {path}; rm -f {path}", timeout=20)
+        if "<hierarchy" in out:
+            break
+        await asyncio.sleep(0.5)
+    else:
+        raise RuntimeError("uiautomator could not dump the screen; try again when it is idle")
+    rotation = emu.rotation
+    size = emu.display_size(rotation)
+    nodes = compact_ui_tree(out[out.index("<?xml") if "<?xml" in out else 0:], emu.lcd, rotation, size)
+    return {"screenWidth": size[0], "screenHeight": size[1], "nodes": nodes}
+
+
+@api
+async def get_logcat(emu: Emulator, body: dict, request: web.Request):
+    q = request.query
+    count = max(1, min(2000, int(q.get("lines", 200))))
+    level = q.get("level", "V").upper()[:1]
+    if level not in LOGCAT_LEVELS:
+        raise ValueError(f"level must be one of {LOGCAT_LEVELS}")
+    pids = None
+    if q.get("package"):
+        pids = {int(p) for p in (await adb_shell(f"pidof {shlex.quote(q['package'])}; true", timeout=10)).split()
+                if p.isdigit()}
+    text = q.get("text", "").lower()
+    out = await adb("logcat", "-d", "-v", "threadtime", "-t", str(count if pids is None and not text else 5000),
+                    timeout=20)
+    lines = []
+    for raw in out.splitlines():
+        e = parse_logcat(raw)
+        if not e or LOGCAT_LEVELS.index(e[3]) < LOGCAT_LEVELS.index(level):
+            continue
+        if pids is not None and e[1] not in pids:
+            continue
+        if text and text not in e[4].lower() and text not in e[5].lower():
+            continue
+        lines.append({"time": e[0], "pid": e[1], "level": e[3], "tag": e[4], "message": e[5]})
+    return {"lines": lines[-count:]}
+
+
 async def logcat_socket(request: web.Request) -> web.WebSocketResponse:
+    if cross_site(request):
+        raise web.HTTPForbidden()
     hub: Logcat = request.app["logcat"]
     ws = web.WebSocketResponse(heartbeat=20)
     await ws.prepare(request)
@@ -440,6 +629,8 @@ async def logcat_socket(request: web.Request) -> web.WebSocketResponse:
 
 
 async def socket(request: web.Request) -> web.WebSocketResponse:
+    if cross_site(request):
+        raise web.HTTPForbidden()
     emu: Emulator = request.app["emu"]
     ws = web.WebSocketResponse(heartbeat=20)
     await ws.prepare(request)
@@ -518,6 +709,9 @@ def main(metadata=None, wait_for_frame=False, serial=None) -> None:
         web.post("/api/clipboard", post_clipboard), web.post("/api/open-url", post_open_url),
         web.post("/api/appearance", post_appearance), web.post("/api/battery", post_battery),
         web.post("/api/location", post_location), web.post("/api/install", post_install),
+        web.get("/api/frame", get_frame), web.get("/api/ui-tree", get_ui_tree), web.get("/api/logcat", get_logcat),
+        web.post("/api/tap", post_tap), web.post("/api/swipe", post_swipe), web.post("/api/key", post_key),
+        web.post("/api/text", post_text), web.post("/api/rotate", post_rotate),
     ])
     web.run_app(app, host=args.host, port=args.port)
 
