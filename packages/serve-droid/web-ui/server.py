@@ -425,7 +425,8 @@ async def post_install(emu: Emulator, body: dict, request: web.Request):
     try:
         await adb("install", "-r", "-g", path, timeout=180)
         package = None
-        aapt = sorted(glob.glob(os.path.join(os.environ.get("ANDROID_HOME", "/opt/android"), "build-tools", "*", "aapt2")))
+        aapt = sorted(glob.glob(os.path.join(os.environ.get("ANDROID_HOME", "/opt/android"), "build-tools", "*",
+                                    "aapt2.exe" if sys.platform == "win32" else "aapt2")))
         if aapt:
             proc = await asyncio.create_subprocess_exec(aapt[-1], "dump", "packagename", path,
                                                         stdout=asyncio.subprocess.PIPE)

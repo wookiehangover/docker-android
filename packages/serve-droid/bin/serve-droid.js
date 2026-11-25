@@ -2,8 +2,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 import { isIP } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -11,19 +9,20 @@ import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline/promises';
 import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer } from '../lib/docker.js';
 import { kvmHelp } from '../lib/kvm.js';
+import { commandLine, nativeLaunch, nativeState, showFiles } from '../lib/native.js';
 
 const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach] [options]
 
 Start or reuse the project's Android emulator and print its browser URL.
 Stop shuts the emulator down and keeps its Android data for the next start.
 
-  start (default)   Launch natively on macOS or with Docker/KVM on Linux
+  start (default)   Launch natively on macOS and Windows, or with Docker/KVM on Linux
   stop              Stop the project's emulator and browser UI
   ls                List running emulators and their browser URLs
   logs              Show the emulator and browser UI logs (-f to follow)
   rm                Stop the emulator and delete its saved data (-y to skip the prompt)
   attach            Start or reuse a native Android emulator in the foreground
-  --serial SERIAL   Native emulator to use on macOS (example: emulator-5554)
+  --serial SERIAL   Native emulator to use on macOS and Windows (example: emulator-5554)
   --name NAME       Select a named emulator (default: current project)
   --device PROFILE  Device profile (default: Samsung Galaxy S10)
   --android VERSION Android version 9–17 (default: 16)
@@ -34,8 +33,7 @@ Stop shuts the emulator down and keeps its Android data for the next start.
   -h, --help        Show this help`;
 
 const owner = 'serve-droid.name';
-const mac = process.platform === 'darwin';
-const nativeState = join(homedir(), 'Library/Caches/serve-droid');
+const native = process.platform === 'darwin' || process.platform === 'win32';
 const profiles = new Set([
   'Nexus 4', 'Nexus 5', 'Nexus 7', 'Nexus One', 'Nexus S', 'Pixel C', 'Pixel 8', 'Pixel 9',
   'Samsung Galaxy S6', 'Samsung Galaxy S7', 'Samsung Galaxy S7 Edge',
@@ -161,10 +159,10 @@ function parseCommand() {
   if (command === 'attach' && Object.keys(values).some(key => !['serial', 'port'].includes(key))) {
     throw new Error('Native emulator startup accepts --serial and --port.');
   }
-  if (mac && command === 'start' && Object.keys(values).some(key => !['serial', 'port', 'name', 'apk'].includes(key))) {
-    throw new Error('Native emulator startup on macOS accepts --serial, --port, --name and --apk.');
+  if (native && command === 'start' && Object.keys(values).some(key => !['serial', 'port', 'name', 'apk'].includes(key))) {
+    throw new Error('Native emulator startup accepts --serial, --port, --name and --apk.');
   }
-  if (!mac && command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
+  if (!native && command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
   const only = { stop: ['name'], logs: ['name', 'follow'], rm: ['name', 'yes'] }[command];
   const extra = Object.keys(values).filter(key => !(only ?? ['name', 'serial', 'port', 'device', 'android', 'host', 'apk', 'image']).includes(key));
   if (extra.length) throw new Error(`--${extra[0]} does not apply to ${command}.`);
@@ -196,19 +194,11 @@ function parseCommand() {
   return { command, name, values };
 }
 
-function nativeLaunch(command, name, values) {
-  const script = fileURLToPath(new URL('../lib/mac-launch.sh', import.meta.url));
-  const args = [script, command, '--port', values.port ?? '6090'];
+function launchNative(command, name, values) {
+  const args = [command, '--port', values.port ?? '6090'];
   if (values.serial) args.push('--serial', values.serial);
   if (command !== 'attach') args.push('--state', join(nativeState, `${name}.json`));
-  const capture = command === 'start';
-  const result = spawnSync('/bin/sh', args, { stdio: ['inherit', capture ? 'pipe' : 'inherit', 'inherit'], encoding: 'utf8' });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    process.exitCode = result.status ?? 1;
-    return;
-  }
-  return capture ? result.stdout.trim().split('\n').at(-1) : undefined;
+  return nativeLaunch(args, command === 'start');
 }
 
 async function installApk(url, apk) {
@@ -239,8 +229,7 @@ function nativeSessions() {
       return [];
     }
     // A stopped or crashed browser UI leaves its state file behind; skip it and any reused PID.
-    const ps = spawnSync('ps', ['-ww', '-p', String(state.pid), '-o', 'command='], { encoding: 'utf8' });
-    if (!state.pid || !ps.stdout?.includes('attach.py')) return [];
+    if (!commandLine(state.pid).includes('attach.py')) return [];
     return [[basename(file, '.json'), `http://127.0.0.1:${state.port}/`, state.serial]];
   });
 }
@@ -258,7 +247,7 @@ function dockerSessions() {
 }
 
 function listSessions() {
-  const rows = mac ? nativeSessions() : dockerSessions();
+  const rows = native ? nativeSessions() : dockerSessions();
   if (!rows.length) return console.error('No running emulators.');
   rows.unshift(['NAME', 'URL', 'DEVICE']);
   const widths = rows[0].map((_, i) => Math.max(...rows.map(row => String(row[i] ?? '').length)));
@@ -290,17 +279,17 @@ function run(command, args) {
   if (result.status && result.signal !== 'SIGINT') process.exitCode = result.status;
 }
 
-function showLogs(name, follow) {
-  const tail = follow ? ['-n', '100', '-F'] : ['-n', '+1'];
-  if (mac) {
+async function showLogs(name, follow) {
+  if (native) {
     const state = existsSync(join(nativeState, `${name}.json`))
       ? JSON.parse(readFileSync(join(nativeState, `${name}.json`), 'utf8')) : {};
     const files = [join(nativeState, `${name}.log`)];
     // The emulator log is shared, so it only belongs to this session when serve-droid booted the emulator for it.
     if (state.avd) files.unshift(join(nativeState, 'emulator.log'));
     if (!files.some(file => existsSync(file))) throw new Error(`No logs for ${name}. Start it with serve-droid start.`);
-    return run('tail', [...tail, ...files.filter(file => follow || existsSync(file))]);
+    return showFiles(files.filter(file => follow || existsSync(file)), follow);
   }
+  const tail = follow ? ['-n', '100', '-F'] : ['-n', '+1'];
   const container = inspectContainer(`serve-droid-${name}`);
   if (!container?.State.Running) throw new Error(`${name} is not running. Its logs are removed when it stops.`);
   checkOwner(container.Config.Labels, name);
@@ -335,11 +324,11 @@ function existingVolumes(name) {
 }
 
 async function remove(name, yes) {
-  if (mac) {
+  if (native) {
     const files = [`${name}.json`, `${name}.log`].map(file => join(nativeState, file)).filter(existsSync);
     if (!files.length) return console.error(`Nothing to remove for ${name}.`);
     if (!yes && !await confirm(`Stop ${name} and forget its session?`)) return console.error('Cancelled.');
-    nativeLaunch('stop', name, {});
+    await launchNative('stop', name, {});
     if (process.exitCode) return;
     for (const file of files) rmSync(file, { force: true });
     return console.error(`Removed ${name}. The AVD and its apps are kept; manage them in Android Studio's Device Manager.`);
@@ -360,8 +349,8 @@ async function main() {
   if (command === 'ls') return listSessions();
   if (command === 'logs') return showLogs(name, values.follow);
   if (command === 'rm') return remove(name, values.yes);
-  if (command === 'attach' || mac) {
-    const url = nativeLaunch(command, name, values);
+  if (command === 'attach' || native) {
+    const url = await launchNative(command, name, values);
     if (!url) return;
     if (values.apk) await installApk(url, values.apk);
     return console.log(url);

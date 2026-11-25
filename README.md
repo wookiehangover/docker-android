@@ -3,7 +3,7 @@ docker-android
 
 Android emulator in Docker with a responsive browser UI. Run it on a Linux host with KVM, then use the device from any browser, including a phone.
 
-On macOS, [start or reuse a native Android emulator with the same browser UI](./packages/serve-droid/README.md#attach-to-android-studio-on-macos).
+On macOS and Windows, [start or reuse a native Android emulator with the same browser UI](./packages/serve-droid/README.md#native-emulators-on-macos-and-windows).
 
 This is a fork of [budtmo/docker-android](https://github.com/budtmo/docker-android) by [Budi Utomo](https://github.com/budtmo). The emulator image, CLI and device profiles come from that project. See [Changes from upstream](#changes-from-upstream) for what this fork adds.
 
