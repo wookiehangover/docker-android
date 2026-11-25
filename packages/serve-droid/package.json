@@ -15,12 +15,14 @@
     "web-ui/mac-requirements.txt",
     "web-ui/pyproject.toml",
     "web-ui/uv.lock",
-    "LICENSE.md"
+    "LICENSE.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "release": "node scripts/release.mjs",
     "test:e2e": "bash test/lifecycle.sh",
     "test:webmcp": "node test/webmcp.mjs"
   },
