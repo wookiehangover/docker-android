@@ -150,7 +150,7 @@ function main() {
   const body = sectionBody(entries);
   const section = `## ${version} (${date})\n\n${body}`;
 
-  console.log(`serve-droid ${current} → ${version} (changes since ${base.slice(0, 12)})`);
+  console.log(`serve-droid ${current} → ${version} (changes since ${base.startsWith('serve-droid-v') ? base : base.slice(0, 7)})`);
   console.log(stale ? `Image source: ${pinned.slice(0, 7)} → ${head.slice(0, 7)}` : `Image source: ${pinned.slice(0, 7)} (unchanged)`);
   console.log(`\n${section}`);
   if (dryRun) return;
