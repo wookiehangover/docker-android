@@ -39,7 +39,7 @@ export function ensureCustomImage(image) {
 }
 
 // Match the Dockerfile, CLI installer and device profiles from one revision.
-const revision = 'a297d8ca2e81bd8c50439faa9416f4b6802b1249';
+const revision = '011ae16cfedd899c135191e540030f7180af75e4';
 const repository = 'https://github.com/wookiehangover/docker-android.git';
 export const apiLevels = new Map(Object.entries({
   '9.0': '28', '10.0': '29', '11.0': '30', '12.0': '32', '13.0': '33',

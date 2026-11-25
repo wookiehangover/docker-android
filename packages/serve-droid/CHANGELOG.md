@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-11-25)
+
+### Features
+
+- Native emulators on Windows ([#8](https://github.com/wookiehangover/docker-android/pull/8))
+
 ## 0.4.0 (2026-11-25)
 
 ### Features
