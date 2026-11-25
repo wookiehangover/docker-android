@@ -913,5 +913,185 @@
 
   loadInfo().finally(connect);
 </script>
+<script>
+  // WebMCP: expose the device to in-browser agents. https://webmachinelearning.github.io/webmcp/
+  (() => {
+    const mc = document.modelContext ?? navigator.modelContext;
+    if (!mc?.registerTool) return;
+
+    async function call(path, body, query) {
+      const url = query ? `${path}?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== ""))}` : path;
+      const r = await fetch(url, body === undefined ? {} : {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || `${path} failed`);
+      delete data.ok;
+      return data;
+    }
+
+    function showTouch(x, y, screenW, screenH, ms = 220) {
+      const dot = document.getElementById("touch-dot");
+      const s = document.getElementById("screen").getBoundingClientRect();
+      const c = document.getElementById("canvas").getBoundingClientRect();
+      dot.style.transform = `translate3d(${c.left - s.left + (x / screenW) * c.width}px, ${c.top - s.top + (y / screenH) * c.height}px, 0)`;
+      dot.classList.add("on", "down");
+      setTimeout(() => dot.classList.remove("on", "down"), ms);
+    }
+
+    let screenSize = null;
+    async function size() {
+      if (!screenSize) {
+        const i = await (await fetch("info")).json();
+        screenSize = [i.width, i.height];
+      }
+      return screenSize;
+    }
+    async function oriented() {
+      const [w, h] = await size();
+      const c = document.getElementById("canvas");
+      return (c.width > c.height) === (w > h) ? [w, h] : [h, w];
+    }
+
+    const point = (desc) => ({ type: "number", minimum: 0, description: desc });
+    const KEYS = ["GoBack", "GoHome", "AppSwitch", "Enter", "Backspace", "Delete", "Tab", "ArrowUp", "ArrowDown",
+      "ArrowLeft", "ArrowRight", "AudioVolumeUp", "AudioVolumeDown", "Power"];
+    const COORDS = "Coordinates are screen pixels in the current orientation, as returned by get_ui_tree and get_screen.";
+
+    const tools = [
+      {
+        name: "get_device_info",
+        title: "Get device info",
+        description: "Device model, Android version, screen size, the foreground app, and battery, location, dark mode and clipboard state.",
+        inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true },
+        execute: async () => {
+          const [info, state, fg, [w, h]] = await Promise.all([fetch("info").then((r) => r.json()), call("api/state"), call("api/foreground"), oriented()]);
+          return { ...info, screenWidth: w, screenHeight: h, foregroundPackage: fg.package, ...state };
+        },
+      },
+      {
+        name: "get_ui_tree",
+        title: "Read the screen layout",
+        description: "List the visible UI elements: class, text, content description, resource id, flags (clickable, editable, scrollable, checked…), and bounds and center in screen pixels. Prefer this over get_screen to find what to tap.",
+        inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: () => call("api/ui-tree"),
+      },
+      {
+        name: "get_screen",
+        title: "Capture the screen",
+        description: "Capture the current screen as a base64 JPEG. The image can be smaller than the screen: scale points by screenWidth / width before tapping.",
+        inputSchema: { type: "object", properties: { max_edge: { type: "integer", minimum: 160, maximum: 1280, default: 768, description: "Longest image edge in pixels." } } },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: ({ max_edge } = {}) => call("api/frame", undefined, { max_edge }),
+      },
+      {
+        name: "tap",
+        title: "Tap",
+        description: `Tap a point on the screen. Set duration_ms to 600 or more for a long press. ${COORDS}`,
+        inputSchema: { type: "object", properties: { x: point("X in pixels."), y: point("Y in pixels."), duration_ms: { type: "integer", minimum: 40, maximum: 5000, default: 60 } }, required: ["x", "y"] },
+        execute: async ({ x, y, duration_ms }) => {
+          const [w, h] = await oriented();
+          showTouch(x, y, w, h, Math.max(220, duration_ms || 0));
+          await call("api/tap", { x, y, duration_ms });
+          return { tapped: [x, y] };
+        },
+      },
+      {
+        name: "swipe",
+        title: "Swipe",
+        description: `Drag from one point to another, for example to scroll. To scroll down a list, swipe from a low point to a higher one. ${COORDS}`,
+        inputSchema: {
+          type: "object",
+          properties: { x1: point("Start X."), y1: point("Start Y."), x2: point("End X."), y2: point("End Y."), duration_ms: { type: "integer", minimum: 50, maximum: 5000, default: 300 } },
+          required: ["x1", "y1", "x2", "y2"],
+        },
+        execute: async ({ x1, y1, x2, y2, duration_ms }) => {
+          const [w, h] = await oriented();
+          showTouch(x2, y2, w, h, duration_ms || 300);
+          await call("api/swipe", { x1, y1, x2, y2, duration_ms });
+          return { swiped: [[x1, y1], [x2, y2]] };
+        },
+      },
+      {
+        name: "type_text",
+        title: "Type text",
+        description: "Type text into the focused field. Tap the field first. Use press_key with Enter to submit.",
+        inputSchema: { type: "object", properties: { text: { type: "string", minLength: 1 } }, required: ["text"] },
+        execute: async ({ text }) => { await call("api/text", { text }); return { typed: text.length }; },
+      },
+      {
+        name: "press_key",
+        title: "Press a key",
+        description: "Press a hardware or keyboard key: GoBack (back), GoHome (home), AppSwitch (recent apps), Enter, Backspace, arrows, volume or Power.",
+        inputSchema: { type: "object", properties: { key: { type: "string", enum: KEYS } }, required: ["key"] },
+        execute: async ({ key }) => { await call("api/key", { key }); return { pressed: key }; },
+      },
+      {
+        name: "rotate",
+        title: "Rotate the device",
+        description: "Rotate the device 90 degrees clockwise. Screen coordinates change after rotation.",
+        inputSchema: { type: "object", properties: {} },
+        execute: async () => { await call("api/rotate", {}); return { rotated: true }; },
+      },
+      {
+        name: "open_url",
+        title: "Open a URL",
+        description: "Open a URL on the device, in the browser or the app that handles it. A URL without a scheme gets https://.",
+        inputSchema: { type: "object", properties: { url: { type: "string", minLength: 1 } }, required: ["url"] },
+        execute: ({ url }) => call("api/open-url", { url }),
+      },
+      {
+        name: "set_clipboard",
+        title: "Set the device clipboard",
+        description: "Replace the device clipboard text.",
+        inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+        execute: async ({ text }) => { await call("api/clipboard", { text }); return { clipboard: text }; },
+      },
+      {
+        name: "set_appearance",
+        title: "Set light or dark mode",
+        description: "Switch the device between light and dark mode.",
+        inputSchema: { type: "object", properties: { dark: { type: "boolean" } }, required: ["dark"] },
+        execute: async ({ dark }) => { await call("api/appearance", { dark }); return { dark }; },
+      },
+      {
+        name: "set_battery",
+        title: "Set the battery",
+        description: "Simulate a battery level and charger state.",
+        inputSchema: { type: "object", properties: { level: { type: "integer", minimum: 0, maximum: 100 }, charging: { type: "boolean" } }, required: ["level", "charging"] },
+        execute: async ({ level, charging }) => { await call("api/battery", { level, charging }); return { level, charging }; },
+      },
+      {
+        name: "set_location",
+        title: "Set the GPS location",
+        description: "Simulate a GPS position.",
+        inputSchema: { type: "object", properties: { lat: { type: "number", minimum: -90, maximum: 90 }, lng: { type: "number", minimum: -180, maximum: 180 } }, required: ["lat", "lng"] },
+        execute: async ({ lat, lng }) => { await call("api/location", { lat, lng }); return { lat, lng }; },
+      },
+      {
+        name: "read_logcat",
+        title: "Read device logs",
+        description: "Read recent logcat lines, oldest first. Filter by minimum level, by text in the tag or message, or by app package.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            lines: { type: "integer", minimum: 1, maximum: 2000, default: 200 },
+            level: { type: "string", enum: ["V", "D", "I", "W", "E", "F"], default: "V", description: "Minimum level." },
+            text: { type: "string" },
+            package: { type: "string", description: "Only lines from this app's running processes." },
+          },
+        },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: ({ lines, level, text, package: pkg } = {}) => call("api/logcat", undefined, { lines, level, text, package: pkg }),
+      },
+    ];
+
+    const done = Promise.allSettled(tools.map(async (tool) => mc.registerTool(tool)))
+      .then((results) => results.forEach((r, i) => r.status === "rejected" && console.warn(`WebMCP: ${tools[i].name} not registered`, r.reason)));
+    mc.waitForToolsUntil?.(done);
+  })();
+</script>
 </body>
 </html>

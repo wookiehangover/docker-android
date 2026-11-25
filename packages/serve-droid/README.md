@@ -62,6 +62,24 @@ configuration conflicts, stop, and persistence after restart. The test prints
 the path to a screenshot. Set `ARTIFACT_DIR` to choose the output directory.
 Append `-- 17` to run the same check on Android 17 and verify the virtual device target.
 
+## WebMCP tools for browser agents
+
+The browser UI registers [WebMCP](https://webmachinelearning.github.io/webmcp/)
+tools, so an AI agent in the same browser can use the device. Tools:
+`get_device_info`, `get_ui_tree`, `get_screen`, `tap`, `swipe`, `type_text`,
+`press_key`, `rotate`, `open_url`, `set_clipboard`, `set_appearance`,
+`set_battery`, `set_location` and `read_logcat`. Coordinates are screen pixels
+in the current orientation, as returned by `get_ui_tree` and `get_screen`.
+
+WebMCP requires a browser that supports it (Edge 147, or Chrome 149 with the
+origin trial or flag) and a secure context: open the UI at a loopback address
+or over HTTPS. A LAN address over plain HTTP gets no tools.
+
+To check the tools against a running emulator, run
+`npm --prefix packages/serve-droid run test:webmcp -- http://127.0.0.1:6090/`.
+It drives the device through each tool and prints a directory with a log of
+every call and screenshots.
+
 ## Native emulators on macOS
 
 On macOS, `serve-droid start` and `serve-droid stop` manage a native emulator
