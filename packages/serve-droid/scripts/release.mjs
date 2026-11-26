@@ -20,7 +20,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const pkgPath = 'packages/serve-droid';
 // Sources the emulator image is built from (see docker/emulator/Dockerfile).
 const imageInputs = ['docker/emulator', 'mixins', 'cli', `${pkgPath}/web-ui`];
-const repoUrl = 'https://github.com/wookiehangover/docker-android';
+const repoUrl = 'https://github.com/wookiehangover/serve-droid';
 const hiddenTypes = new Set(['build', 'chore', 'ci', 'docs', 'refactor', 'release', 'style', 'test']);
 const sections = [
   ['breaking', 'Breaking changes'], ['feat', 'Features'], ['fix', 'Fixes'],

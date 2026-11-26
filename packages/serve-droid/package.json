@@ -1,7 +1,18 @@
 {
   "name": "serve-droid",
   "version": "0.5.0",
-  "description": "Start a Dockerized Android emulator and use it in your browser",
+  "description": "Host an Android emulator, use it from any browser, and control it with WebMCP",
+  "keywords": [
+    "android",
+    "emulator",
+    "webmcp",
+    "mcp",
+    "ai-agents",
+    "remote",
+    "docker"
+  ],
+  "homepage": "https://github.com/wookiehangover/serve-droid#readme",
+  "bugs": "https://github.com/wookiehangover/serve-droid/issues",
   "type": "module",
   "bin": {
     "serve-droid": "./bin/serve-droid.js"
@@ -28,7 +39,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wookiehangover/docker-android.git",
+    "url": "git+https://github.com/wookiehangover/serve-droid.git",
     "directory": "packages/serve-droid"
   },
   "license": "SEE LICENSE IN LICENSE.md",
