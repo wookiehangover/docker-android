@@ -25,6 +25,9 @@ for example `serve-droid start --host 192.168.1.42 --port 6090`, then open
 IPv4 interfaces or `--host ::` for all IPv6 interfaces. For these wildcard
 bindings the CLI prints a loopback URL for local use. To change the binding
 of a running emulator, stop it and start it again with the desired host.
+For HTTPS from anywhere on your tailnet, which WebMCP needs, keep the default
+host and run `tailscale serve --bg 6090` next to `--port 6090`. See
+[Access from anywhere](https://github.com/wookiehangover/serve-droid#access-from-anywhere).
 
 The launcher uses the Git root (or the working directory outside Git) to
 identify the project. Later runs reuse its emulator, including its apps and
