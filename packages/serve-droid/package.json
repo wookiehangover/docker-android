@@ -1,6 +1,6 @@
 {
   "name": "serve-droid",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Host an Android emulator, use it from any browser, and control it with WebMCP",
   "keywords": [
     "android",

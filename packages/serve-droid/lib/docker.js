@@ -39,7 +39,7 @@ export function ensureCustomImage(image) {
 }
 
 // Match the Dockerfile, CLI installer and device profiles from one revision.
-const revision = '011ae16cfedd899c135191e540030f7180af75e4';
+const revision = 'da5b53b9cbdc229f240e167de0feb061d5ef5f04';
 const repository = 'https://github.com/wookiehangover/serve-droid.git';
 export const apiLevels = new Map(Object.entries({
   '9.0': '28', '10.0': '29', '11.0': '30', '12.0': '32', '13.0': '33',

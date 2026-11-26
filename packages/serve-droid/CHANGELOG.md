@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1 (2026-11-26)
+
+### Other changes
+
+- Renamed to serve-droid: new README focused on remote access and WebMCP, repository links, and the browser UI header ([#9](https://github.com/wookiehangover/serve-droid/pull/9))
+
+### Fixes
+
+- Show the full tag in the release summary ([0dd5fff](https://github.com/wookiehangover/serve-droid/commit/0dd5fffb993ca0e8e6f883d91f508dd2b83b9b98))
+
 ## 0.5.0 (2026-11-25)
 
 ### Features
