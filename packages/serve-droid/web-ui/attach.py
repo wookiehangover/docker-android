@@ -245,7 +245,8 @@ def serving(port, serial):
     # Windows retries refused loopback connections for about two seconds.
     conn = http.client.HTTPConnection("127.0.0.1", int(port), timeout=5)
     try:
-        conn.request("GET", "/info")
+        token = os.environ.get("WEB_UI_TOKEN")
+        conn.request("GET", "/info", headers={"Authorization": f"Bearer {token}"} if token else {})
         response = conn.getresponse()
         if response.status == 200:
             info = json.loads(response.read(65536))

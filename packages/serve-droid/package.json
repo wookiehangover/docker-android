@@ -17,11 +17,23 @@
   "bin": {
     "serve-droid": "./bin/serve-droid.js"
   },
+  "exports": {
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./middleware": {
+      "types": "./lib/middleware.d.ts",
+      "default": "./lib/middleware.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "bin",
     "lib",
     "web-ui/*.py",
     "web-ui/*.html",
+    "web-ui/tools.json",
     "web-ui/requirements.txt",
     "web-ui/native-requirements.txt",
     "web-ui/pyproject.toml",
