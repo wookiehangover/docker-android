@@ -147,7 +147,10 @@ function main() {
   const stale = !gitOk('merge-base', '--is-ancestor', pinned, 'HEAD') ||
     !gitOk('diff', '--quiet', pinned, 'HEAD', '--', ...imageInputs);
   const date = new Date().toISOString().slice(0, 10);
-  const body = sectionBody(entries);
+  const changelog = existsSync(files.changelog) ? readFileSync(files.changelog, 'utf8') : '# Changelog\n';
+  // A hand-written "## Unreleased" section becomes the release notes instead of the commit list.
+  const unreleased = changelog.match(/^## Unreleased[ \t]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m);
+  const body = unreleased ? `${unreleased[1].trim()}\n` : sectionBody(entries);
   const section = `## ${version} (${date})\n\n${body}`;
 
   console.log(`serve-droid ${current} → ${version} (changes since ${base.startsWith('serve-droid-v') ? base : base.slice(0, 7)})`);
@@ -156,11 +159,11 @@ function main() {
   if (dryRun) return;
 
   writeFileSync(files.package, pkg.replace(/"version": "[^"]+"/, `"version": "${version}"`));
-  const changelog = existsSync(files.changelog) ? readFileSync(files.changelog, 'utf8') : '# Changelog\n';
-  const at = changelog.search(/^## /m);
+  const rest = unreleased ? changelog.replace(unreleased[0], '') : changelog;
+  const at = rest.search(/^## /m);
   writeFileSync(files.changelog, at < 0
-    ? `${changelog.trimEnd()}\n\n${section}`
-    : `${changelog.slice(0, at)}${section}\n${changelog.slice(at)}`);
+    ? `${rest.trimEnd()}\n\n${section}`
+    : `${rest.slice(0, at)}${section}\n${rest.slice(at)}`);
   if (stale) writeFileSync(files.docker, docker.replace(pinned, head));
 
   git('add', '--', files.package, files.changelog, files.docker);

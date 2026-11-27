@@ -1,17 +1,22 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { createReadStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { isIP } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline/promises';
-import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer } from '../lib/docker.js';
+import { apiLevels, docker, emulatorImage, ensureCustomImage, imageId, inspectContainer } from '../lib/docker.js';
 import { kvmHelp } from '../lib/kvm.js';
-import { commandLine, nativeLaunch, nativeState, showFiles } from '../lib/native.js';
+import { nativeLaunch, nativeState, showFiles } from '../lib/native.js';
+import { containerToken, containerUrl, listSessions, native, owner, projectName, readNativeState, resolveUrl, withToken } from '../lib/sessions.js';
+import { actionHelp, actionOptions, actionVerbs, runAction } from '../lib/actions.js';
+import { runMcp } from '../lib/mcp.js';
+import { hubToken, startHub } from '../lib/hub.js';
+import { formatDoctor, runDoctor } from '../lib/doctor.js';
 
-const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach] [options]
+const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach|mcp|hub|doctor|ACTION] [options]
 
 Start or reuse the project's Android emulator and print its browser URL.
 Stop shuts the emulator down and keeps its Android data for the next start.
@@ -22,6 +27,10 @@ Stop shuts the emulator down and keeps its Android data for the next start.
   logs              Show the emulator and browser UI logs (-f to follow)
   rm                Stop the emulator and delete its saved data (-y to skip the prompt)
   attach            Start or reuse a native Android emulator in the foreground
+  mcp               Serve MCP over stdio for agents (--name, --url, --start boots the emulator first)
+  hub               One page for every running emulator, each proxied under /d/NAME/ on one port
+                    (--host, --port default 6089, --token)
+  doctor            Check this machine's setup and show how to fix each problem (--json)
   --serial SERIAL   Native emulator to use on macOS and Windows (example: emulator-5554)
   --name NAME       Select a named emulator (default: current project)
   --device PROFILE  Device profile (default: Samsung Galaxy S10)
@@ -30,22 +39,18 @@ Stop shuts the emulator down and keeps its Android data for the next start.
   --port PORT       Local browser port (default: Docker picks a free port)
   --apk FILE        Install an APK after boot
   --image IMAGE     Use a compatible Docker image instead of the default build
-  -h, --help        Show this help`;
+  --token           Require a token for the browser UI and API; the printed URL carries it
+  --url URL         Use a running serve-droid at this URL (mcp and actions; or set SERVE_DROID_URL)
+  -h, --help        Show this help
 
-const owner = 'serve-droid.name';
-const native = process.platform === 'darwin' || process.platform === 'win32';
+${actionHelp}`;
+
+const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const profiles = new Set([
   'Nexus 4', 'Nexus 5', 'Nexus 7', 'Nexus One', 'Nexus S', 'Pixel C', 'Pixel 8', 'Pixel 9',
   'Samsung Galaxy S6', 'Samsung Galaxy S7', 'Samsung Galaxy S7 Edge',
   'Samsung Galaxy S8', 'Samsung Galaxy S9', 'Samsung Galaxy S10',
 ]);
-
-function projectName() {
-  const git = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' });
-  const path = git.status === 0 ? git.stdout.trim() : process.cwd();
-  const slug = basename(path).toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 40);
-  return `${slug || 'project'}-${createHash('sha256').update(path).digest('hex').slice(0, 10)}`;
-}
 
 function checkConfig(settings, options) {
   for (const key of ['device', 'android', 'image', 'host', 'port']) {
@@ -90,6 +95,10 @@ function checkContainer(container, name, options) {
   settings.port = binding?.HostPort ?? settings.port;
   settings.host = binding?.HostIp ?? settings.host ?? '127.0.0.1';
   checkConfig(settings, options);
+  if (options.token && !containerToken(container)) {
+    throw new Error(`${name} is running without a token. Stop it first to restart it with --token.`);
+  }
+  return settings;
 }
 
 function createContainer(name, options) {
@@ -101,8 +110,11 @@ function createContainer(name, options) {
   const publishHost = isIP(host) === 6 ? `[${host}]` : host;
   docker('run', '--rm', '--user', '0', '--entrypoint', 'chown', ...mounts, image,
     '1300:1301', '/home/androidusr/emulator', '/home/androidusr/.android');
+  // A new token per container: stopping the emulator revokes the old URL.
+  const token = options.token ? randomBytes(24).toString('base64url') : undefined;
   const args = [
     'create', '--rm', '--name', `serve-droid-${name}`, '--device', '/dev/kvm',
+    ...(token ? ['--label', `serve-droid.token=${token}`, '--env', `WEB_UI_TOKEN=${token}`] : []),
     '--publish', `${publishHost}:${port ?? ''}:6090`,
     '--label', `${owner}=${name}`, '--label', `serve-droid.config=${JSON.stringify({ ...settings, host, port })}`,
     '--env', `EMULATOR_DEVICE=${settings.device}`, '--env', 'WEB_UI=true', '--env', 'EMULATOR_HEADLESS=true',
@@ -119,7 +131,7 @@ function createContainer(name, options) {
   }
 }
 
-async function waitForBoot(id, name, url) {
+async function waitForBoot(id, name, url, token) {
   const deadline = Date.now() + 600_000;
   console.error(`Waiting for ${name} to boot…`);
   while (Date.now() < deadline) {
@@ -128,7 +140,9 @@ async function waitForBoot(id, name, url) {
       const boot = docker('exec', id, 'adb', 'shell',
         'getprop sys.boot_completed; getprop init.svc.bootanim; pm path android');
       if (/^1\r?\nstopped\r?\npackage:/.test(boot)) {
-        const response = await fetch(`${url}info`, { signal: AbortSignal.timeout(3000) });
+        const response = await fetch(`${url}info`, {
+          signal: AbortSignal.timeout(3000), headers: token ? { authorization: `Bearer ${token}` } : {},
+        });
         if (response.ok) return;
       }
     } catch {
@@ -139,19 +153,50 @@ async function waitForBoot(id, name, url) {
   throw new Error(`Boot timed out. Run serve-droid logs --name ${name.replace(/^serve-droid-/, '')} for details.`);
 }
 
+const lifecycleOptions = {
+  help: { type: 'boolean', short: 'h' },
+  serial: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, yes: { type: 'boolean', short: 'y' },
+  name: { type: 'string' }, device: { type: 'string' }, android: { type: 'string' },
+  host: { type: 'string' }, port: { type: 'string' }, apk: { type: 'string' }, image: { type: 'string' },
+  token: { type: 'boolean' }, json: { type: 'boolean' },
+};
+
+function checkName(name) {
+  if (name !== undefined && !/^[a-zA-Z0-9_-]{1,100}$/.test(name)) {
+    throw new Error('--name must be 1–100 letters, digits, hyphens or underscores.');
+  }
+}
+
+// Action verbs and mcp talk to a running emulator and take their own options.
+function parseClientCommand(verb) {
+  const options = verb === 'mcp'
+    ? { help: lifecycleOptions.help, name: { type: 'string' }, url: { type: 'string' }, start: { type: 'boolean' } }
+    : { help: lifecycleOptions.help, name: { type: 'string' }, ...actionOptions };
+  // Negative numbers (geo -122.4, swipe offsets) are arguments, not options.
+  const negative = /^-\d+(\.\d+)?$/;
+  const argv = process.argv.slice(2).map(arg => negative.test(arg) ? `\0${arg}` : arg);
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options });
+  if (values.help) return { command: 'help' };
+  const args = positionals.slice(positionals.indexOf(verb) + 1).map(arg => arg.replace(/^\0/, ''));
+  if (verb === 'mcp' && args.length) throw new Error('mcp takes no arguments.');
+  if (values.name !== undefined && values.url !== undefined) throw new Error('Use --name or --url, not both.');
+  if (values.start && values.url !== undefined) throw new Error('--start manages a local emulator; it cannot be used with --url.');
+  checkName(values.name);
+  return { command: verb, args, values };
+}
+
 function parseCommand() {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      help: { type: 'boolean', short: 'h' },
-      serial: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, yes: { type: 'boolean', short: 'y' },
-      name: { type: 'string' }, device: { type: 'string' }, android: { type: 'string' },
-      host: { type: 'string' }, port: { type: 'string' }, apk: { type: 'string' }, image: { type: 'string' },
-    },
-  });
+  const [verb] = parseArgs({ allowPositionals: true, strict: false, options: { ...lifecycleOptions, ...actionOptions } }).positionals;
+  if (verb === 'mcp' || actionVerbs.has(verb)) return parseClientCommand(verb);
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: lifecycleOptions });
   if (values.help) return { command: 'help' };
   const [command = 'start'] = positionals;
-  if (positionals.length > 1 || !['start', 'stop', 'ls', 'logs', 'rm', 'attach'].includes(command)) throw new Error(help);
+  if (positionals.length > 1 || !['start', 'stop', 'ls', 'logs', 'rm', 'attach', 'hub', 'doctor'].includes(command)) throw new Error(help);
+  if (command === 'doctor') {
+    if (Object.keys(values).some(key => key !== 'json')) throw new Error('doctor accepts only --json.');
+    return { command, values };
+  }
+  if (values.json) throw new Error(`--json does not apply to ${command}.`);
   if (command === 'ls') {
     if (Object.keys(values).length) throw new Error('ls takes no options.');
     return { command };
@@ -159,17 +204,15 @@ function parseCommand() {
   if (command === 'attach' && Object.keys(values).some(key => !['serial', 'port'].includes(key))) {
     throw new Error('Native emulator startup accepts --serial and --port.');
   }
-  if (native && command === 'start' && Object.keys(values).some(key => !['serial', 'port', 'name', 'apk'].includes(key))) {
-    throw new Error('Native emulator startup accepts --serial, --port, --name and --apk.');
+  if (native && command === 'start' && Object.keys(values).some(key => !['serial', 'port', 'name', 'apk', 'token'].includes(key))) {
+    throw new Error('Native emulator startup accepts --serial, --port, --name, --apk and --token.');
   }
   if (!native && command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
-  const only = { stop: ['name'], logs: ['name', 'follow'], rm: ['name', 'yes'] }[command];
-  const extra = Object.keys(values).filter(key => !(only ?? ['name', 'serial', 'port', 'device', 'android', 'host', 'apk', 'image']).includes(key));
+  const only = { stop: ['name'], logs: ['name', 'follow'], rm: ['name', 'yes'], hub: ['host', 'port', 'token'] }[command];
+  const extra = Object.keys(values).filter(key => !(only ?? ['name', 'serial', 'port', 'device', 'android', 'host', 'apk', 'image', 'token']).includes(key));
   if (extra.length) throw new Error(`--${extra[0]} does not apply to ${command}.`);
   const name = values.name ?? projectName();
-  if (!/^[a-zA-Z0-9_-]{1,100}$/.test(name)) {
-    throw new Error('--name must be 1–100 letters, digits, hyphens or underscores.');
-  }
+  checkName(name);
   if (values.host !== undefined) {
     if (!isIP(values.host) || values.host.includes('%')) throw new Error('--host must be an IPv4 or IPv6 address.');
     if (isIP(values.host) === 6) values.host = new URL(`http://[${values.host}]`).hostname.slice(1, -1);
@@ -194,60 +237,50 @@ function parseCommand() {
   return { command, name, values };
 }
 
-function launchNative(command, name, values) {
+// Keep the token in the session state so a running browser UI and its URL keep matching.
+function nativeToken(name, values) {
+  const statePath = join(nativeState, `${name}.json`);
+  const state = readNativeState(name);
+  const running = listSessions().some(session => session.name === name);
+  let token = running ? state.token : undefined;
+  if (running && values.token && !token) {
+    throw new Error(`${name} is running without a token. Stop it first to restart it with --token.`);
+  }
+  if (!running) token = values.token ? randomBytes(24).toString('base64url') : undefined;
+  if (token !== state.token && (token || existsSync(statePath))) {
+    mkdirSync(nativeState, { recursive: true });
+    const { token: _, ...rest } = state;
+    writeFileSync(statePath, JSON.stringify(token ? { ...rest, token } : rest));
+  }
+  return token;
+}
+
+async function launchNative(command, name, values) {
   const args = [command, '--port', values.port ?? '6090'];
   if (values.serial) args.push('--serial', values.serial);
   if (command !== 'attach') args.push('--state', join(nativeState, `${name}.json`));
-  return nativeLaunch(args, command === 'start');
+  if (command === 'start') {
+    const token = nativeToken(name, values);
+    if (token) process.env.WEB_UI_TOKEN = token;
+    else delete process.env.WEB_UI_TOKEN;
+  }
+  const url = await nativeLaunch(args, command === 'start');
+  return url && withToken(url, process.env.WEB_UI_TOKEN);
 }
 
 async function installApk(url, apk) {
   console.error(`Installing ${basename(apk)}…`);
-  const response = await fetch(`${url}api/install`, {
+  const token = new URL(url).searchParams.get('token');
+  const response = await fetch(new URL('api/install', url), {
     method: 'POST', body: createReadStream(apk), duplex: 'half',
-    headers: { 'content-type': 'application/octet-stream' },
+    headers: { 'content-type': 'application/octet-stream', ...(token ? { authorization: `Bearer ${token}` } : {}) },
     signal: AbortSignal.timeout(240_000),
   });
   if (!response.ok) throw new Error(`APK install failed (${response.status}): ${await response.text()}`);
 }
 
-function containerUrl(container) {
-  const binding = container.NetworkSettings.Ports['6090/tcp'][0];
-  let host = binding.HostIp;
-  if (host === '0.0.0.0') host = '127.0.0.1';
-  if (host === '::') host = '::1';
-  return `http://${isIP(host) === 6 ? `[${host}]` : host}:${binding.HostPort}/`;
-}
-
-function nativeSessions() {
-  const files = existsSync(nativeState) ? readdirSync(nativeState).filter(file => file.endsWith('.json')) : [];
-  return files.flatMap(file => {
-    let state;
-    try {
-      state = JSON.parse(readFileSync(join(nativeState, file), 'utf8'));
-    } catch {
-      return [];
-    }
-    // A stopped or crashed browser UI leaves its state file behind; skip it and any reused PID.
-    if (!commandLine(state.pid).includes('attach.py')) return [];
-    return [[basename(file, '.json'), `http://127.0.0.1:${state.port}/`, state.serial]];
-  });
-}
-
-function dockerSessions() {
-  const ids = docker('ps', '--quiet', '--filter', `label=${owner}`).split('\n').filter(Boolean);
-  if (!ids.length) return [];
-  return JSON.parse(docker('container', 'inspect', ...ids)).map(container => {
-    const settings = JSON.parse(container.Config.Labels['serve-droid.config'] ?? '{}');
-    const device = [settings.device, settings.android && `Android ${settings.android.replace(/\.0$/, '')}`]
-      .filter(Boolean).join(', ') || settings.image;
-    const bound = container.NetworkSettings.Ports['6090/tcp']?.length;
-    return [container.Config.Labels[owner], bound ? containerUrl(container) : '-', device];
-  });
-}
-
-function listSessions() {
-  const rows = native ? nativeSessions() : dockerSessions();
+function printSessions() {
+  const rows = listSessions().map(session => [session.name, session.url ?? '-', session.device]);
   if (!rows.length) return console.error('No running emulators.');
   rows.unshift(['NAME', 'URL', 'DEVICE']);
   const widths = rows[0].map((_, i) => Math.max(...rows.map(row => String(row[i] ?? '').length)));
@@ -343,26 +376,23 @@ async function remove(name, yes) {
   console.error(`Removed ${name}.`);
 }
 
-async function main() {
-  const { command, name, values } = parseCommand();
-  if (command === 'help') return console.log(help);
-  if (command === 'ls') return listSessions();
-  if (command === 'logs') return showLogs(name, values.follow);
-  if (command === 'rm') return remove(name, values.yes);
-  if (command === 'attach' || native) {
-    const url = await launchNative(command, name, values);
-    if (!url) return;
-    if (values.apk) await installApk(url, values.apk);
-    return console.log(url);
-  }
-  if (command === 'start' && !existsSync('/dev/kvm')) {
-    throw new Error(kvmHelp());
-  }
+// Start or reuse the emulator and return its URL (with ?token= when it has one). Progress goes to stderr.
+async function startEmulator(name, values) {
+  if (native) return launchNative('start', name, values);
+  if (!existsSync('/dev/kvm')) throw new Error(kvmHelp());
   const containerName = `serve-droid-${name}`;
-  const container = inspectContainer(containerName);
-  if (container) checkContainer(container, name, values);
-  if (command === 'stop') return stopContainer(container);
-  const id = container?.Id ?? createContainer(name, values);
+  let container = inspectContainer(containerName);
+  let options = values;
+  const settings = container && checkContainer(container, name, values);
+  // A container on an older emulator image moves to the current one. The volumes keep apps and data.
+  // --image containers keep their image.
+  if (settings && !settings.image && imageId(emulatorImage(settings.android)) !== container.Image) {
+    console.error(`Moving ${name} to the new emulator image. Its apps and data are kept.`);
+    await stopContainer(container);
+    options = { ...values, host: settings.host, port: settings.port, token: values.token || Boolean(containerToken(container)) };
+    container = null;
+  }
+  const id = container?.Id ?? createContainer(name, options);
   if (!container?.State.Running) {
     try {
       docker('start', id);
@@ -372,13 +402,66 @@ async function main() {
       throw error;
     }
   }
-  const url = containerUrl(inspectContainer(id));
-  await waitForBoot(id, containerName, url);
+  const running = inspectContainer(id);
+  const url = containerUrl(running);
+  const token = containerToken(running);
+  await waitForBoot(id, containerName, url, token);
+  return withToken(url, token);
+}
+
+async function main() {
+  const { command, name, values, args } = parseCommand();
+  if (command === 'help') return console.log(help);
+  if (command === 'ls') return printSessions();
+  if (command === 'doctor') {
+    const report = runDoctor();
+    console.log(values.json ? JSON.stringify(report, null, 2) : formatDoctor(report));
+    if (!report.ok) process.exitCode = 1;
+    return;
+  }
+  if (command === 'mcp') {
+    // stdout is the JSON-RPC channel: everything else goes to stderr.
+    console.log = console.error;
+    let started;
+    const resolve = async () => values.start
+      ? started ??= startEmulator(values.name ?? projectName(), {}).catch(error => {
+        started = undefined; // let the next tool call retry
+        throw error;
+      })
+      : resolveUrl({ name: values.name, url: values.url });
+    if (values.start) resolve().catch(error => console.error(`serve-droid mcp: ${error.message}`));
+    return runMcp({ resolve, version });
+  }
+  if (actionVerbs.has(command)) {
+    const url = resolveUrl({ name: values.name, url: values.url });
+    process.exitCode = await runAction(command, args, values, url);
+    return;
+  }
+  if (command === 'hub') {
+    const { url } = await startHub({ host: values.host, port: values.port, token: values.token ? hubToken() : undefined });
+    console.error('Serving every running emulator. Stop with Ctrl-C.');
+    return console.log(url);
+  }
+  if (command === 'logs') return showLogs(name, values.follow);
+  if (command === 'rm') return remove(name, values.yes);
+  if (command === 'attach' || (native && command === 'stop')) {
+    const url = await launchNative(command, name, values);
+    if (url) console.log(url);
+    return;
+  }
+  if (command === 'stop') {
+    const container = inspectContainer(`serve-droid-${name}`);
+    if (container) checkOwner(container.Config.Labels, name);
+    return stopContainer(container);
+  }
+  const url = await startEmulator(name, values);
+  if (!url) return;
   if (values.apk) await installApk(url, values.apk);
   console.log(url);
 }
 
 main().catch(error => {
   console.error(`serve-droid: ${error.message}`);
+  if (error.usage) console.error('Run serve-droid --help for usage.');
   process.exitCode = 1;
 });

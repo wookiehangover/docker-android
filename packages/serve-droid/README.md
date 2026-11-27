@@ -11,8 +11,13 @@ npx serve-droid --apk ./app-debug.apk
 npx serve-droid --name tablet --device "Pixel C" --port 6081
 npx serve-droid stop --name tablet
 npx serve-droid ls
+npx serve-droid doctor                  # check Docker, KVM, SDK and Python, with fixes
 npx serve-droid logs -f
 npx serve-droid rm --name tablet
+npx serve-droid --token                 # require a token; the URL carries it
+npx serve-droid mcp --start             # stdio MCP for Claude Code, Cursor, Codex
+npx serve-droid hub                     # every running emulator on one page
+npx serve-droid tap --text Settings     # drive the running emulator
 ```
 
 The default is a headless Samsung Galaxy S10 running Android 16. Docker picks
@@ -38,6 +43,17 @@ volumes. A different device,
 image or port can run alongside it under another `--name`. `rm` stops the
 emulator and deletes both volumes (`serve-droid-<name>-data` and
 `serve-droid-<name>-home`) after you confirm. Use `--yes` to skip the prompt.
+
+## Troubleshooting
+
+`serve-droid doctor` checks the machine without changing it: Node 22+, Git,
+running emulators and optional Tailscale; on Linux the Docker CLI, daemon
+access and permissions, BuildKit, `/dev/kvm`, the emulator image, free disk
+and memory (about 4 GB per emulator); on macOS and Windows the Android SDK,
+adb, emulator, sdkmanager, a system image and an AVD, acceleration, and the
+Python setup for the browser UI. Each warning or failure prints a `Fix:` line.
+It exits 1 when a required check fails. `--json` prints
+`{ok, platform, checks: [{id, status, detail, fix?}]}`.
 
 ## First launch
 
@@ -82,27 +98,88 @@ npm publish ./packages/serve-droid
 ```
 
 The script picks the version from the commit types since the last release,
-adds a section to [CHANGELOG.md](./CHANGELOG.md), points the Linux emulator
+adds a section to [CHANGELOG.md](./CHANGELOG.md) (a hand-written `## Unreleased`
+section becomes that release's notes), points the Linux emulator
 image at the released source, then commits and tags `serve-droid-vX.Y.Z`.
 Pushing the tag creates the GitHub release.
 
-## WebMCP tools for browser agents
+## Agent tools
 
-The browser UI registers [WebMCP](https://webmachinelearning.github.io/webmcp/)
-tools, so an AI agent in the same browser can use the device. Tools:
-`get_device_info`, `get_ui_tree`, `get_screen`, `tap`, `swipe`, `type_text`,
-`press_key`, `rotate`, `open_url`, `set_clipboard`, `set_appearance`,
-`set_battery`, `set_location` and `read_logcat`. Coordinates are screen pixels
-in the current orientation, as returned by `get_ui_tree` and `get_screen`.
+The server describes its tools once, in `web-ui/tools.json` (served at
+`GET tools.json`). The browser UI registers them with
+[WebMCP](https://webmachinelearning.github.io/webmcp/), and `serve-droid mcp`
+serves the same list over stdio. There are 28: `get_device_info`,
+`get_ui_tree`, `get_screen`, `find_elements`, `tap`, `wait_for`, `swipe`,
+`scroll`, `pinch`, `type_text`, `press_key`, `rotate`, `open_url`,
+`set_clipboard`, `set_appearance`, `set_battery`, `set_location`,
+`read_logcat`, `list_apps`, `manage_app`, `snapshot`, `send_sms`,
+`phone_call`, `touch_fingerprint`, `set_network`, `set_accessibility`,
+`get_events` and `run_shell`. `serve-droid mcp` adds `install_apk {path}`.
+Coordinates are screen pixels in the current orientation, as returned by
+`get_ui_tree` and `get_screen`. `tap`, `find_elements` and `wait_for` also take
+a selector (`text`, `id`, `desc`, `class`, `exact`, `index`).
 
 WebMCP requires a browser that supports it (Edge 147, or Chrome 149 with the
 origin trial or flag) and a secure context: open the UI at a loopback address
 or over HTTPS. A LAN address over plain HTTP gets no tools.
 
-To check the tools against a running emulator, run
-`npm --prefix packages/serve-droid run test:webmcp -- http://127.0.0.1:6090/`.
-It drives the device through each tool and prints a directory with a log of
-every call and screenshots.
+### Stdio MCP
+
+```sh
+claude mcp add android -- npx serve-droid mcp --start
+```
+
+`serve-droid mcp` speaks newline-delimited JSON-RPC (MCP 2025-06-18) on stdin
+and stdout and logs to stderr. It resolves the emulator lazily: `--url`, then
+`SERVE_DROID_URL`, then `--name` or the current project. `--start` boots the
+project's emulator first.
+
+### CLI actions, replay and the Node client
+
+Run `serve-droid --help` for the action verbs (`screenshot`, `ui`, `find`,
+`tap`, `wait`, `swipe`, `type`, `key`, `open`, `apps`, `launch`, `app`,
+`snapshot`, `sms`, `call`, `geo`, `network`, `shell`, `events`, `replay`).
+They take `--name` or `--url` and print JSON with `--json`. `wait` and `find`
+exit 1 when nothing matches, so they work in shell scripts.
+
+`serve-droid events --export flow.json` saves the event log as a script, and
+`serve-droid replay flow.json --speed 2` plays it back. Steps are
+`{t, action, ...params}`; steps whose body has its own `t`, `action` or
+`params` field (`app`, `phone`, `snapshots`) nest it as `params`.
+
+`import { connect } from 'serve-droid/client'` gives a typed client for every
+endpoint. `import { droidMiddleware } from 'serve-droid/middleware'` proxies
+the UI, API and WebSockets under a path of your own server (`/.droid` by
+default) with only `node:http`.
+
+### Token
+
+`serve-droid start --token` sets `WEB_UI_TOKEN` in the container (or in the
+native browser UI's environment) and prints a URL with `?token=`. Opening it
+sets an HttpOnly, SameSite=Strict cookie. Other clients send
+`Authorization: Bearer <token>`. `ls` shows the URL with its token. Each
+Docker `start` makes a new token.
+
+### Hub
+
+`serve-droid hub [--host IP] [--port 6089] [--token]` lists every running
+emulator as a live tile and proxies each one under `/d/<name>/`, so one port
+(and one `tailscale serve --bg 6089`) covers all of them. The hub adds each
+emulator's token itself; its own `--token` protects the hub. Anyone who can
+reach the hub can use every emulator behind it.
+
+### Tests
+
+```sh
+npm --prefix packages/serve-droid run test:webmcp -- URL
+npm --prefix packages/serve-droid run test:agent -- URL --name NAME
+```
+
+`test:webmcp` loads the page in Chromium and calls every manifest tool through
+WebMCP. `test:agent` covers token auth, the Node client, snapshots, every CLI
+verb, record and replay, `serve-droid mcp` over stdio and (with `--name`) the
+hub. Both print a directory with screenshots and a JSON log. Start the emulator
+with `--token` so the token checks run.
 
 ## Native emulators on macOS and Windows
 

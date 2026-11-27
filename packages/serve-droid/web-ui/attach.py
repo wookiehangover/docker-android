@@ -240,23 +240,43 @@ def credentials(props):
         path.unlink(missing_ok=True)
 
 
-def serving(port, serial):
-    """Return True if our UI for serial answers on port, False if nothing listens."""
+def probe(port, token=None):
+    """GET /info on the local UI. Returns (status, info) or None when nothing listens."""
     # Windows retries refused loopback connections for about two seconds.
     conn = http.client.HTTPConnection("127.0.0.1", int(port), timeout=5)
     try:
-        conn.request("GET", "/info")
+        conn.request("GET", "/info", headers={"Authorization": f"Bearer {token}"} if token else {})
         response = conn.getresponse()
-        if response.status == 200:
-            info = json.loads(response.read(65536))
-            if isinstance(info, dict) and info.get("serve_droid_serial") == serial:
-                return True
+        info = json.loads(response.read(65536)) if response.status == 200 else None
+        return response.status, info if isinstance(info, dict) else None
     except ConnectionRefusedError:
-        return False
+        return None
     except (OSError, http.client.HTTPException, ValueError):
-        pass
+        return 0, None
     finally:
         conn.close()
+
+
+def serving(port, serial):
+    """Return True if our UI for serial answers on port with the expected auth, False if nothing listens."""
+    token = os.environ.get("WEB_UI_TOKEN")
+    anonymous = probe(port)
+    if anonymous is None:
+        return False
+    status, info = anonymous
+    ours = status == 200 and info and info.get("serve_droid_serial") == serial
+    if token and ours:
+        raise ValueError(f"The browser UI on port {port} has no token. Run serve-droid stop, then start it "
+                         "again with --token.")
+    if ours:
+        return True
+    if token and status == 401:
+        result = probe(port, token)
+        if result and result[0] == 200 and result[1] and result[1].get("serve_droid_serial") == serial:
+            return True
+    if not token and status == 401:
+        raise ValueError(f"The browser UI on port {port} requires a token. Start it with --token, "
+                         "or run serve-droid stop first.")
     raise ValueError(f"Port {port} is in use by another service or emulator. Choose another --port.")
 
 

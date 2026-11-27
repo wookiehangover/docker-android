@@ -1,0 +1,7 @@
+# Lint config for the web UI server, used by .github/workflows/serve-droid-ci.yml.
+# Kept to real bugs (pyflakes plus syntax-level pycodestyle); no style rules.
+target-version = "py312"
+line-length = 200
+
+[lint]
+select = ["E4", "E7", "E9", "F"]

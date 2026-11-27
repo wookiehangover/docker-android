@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<title>serve-droid hub</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0a0a;
+    --surface: #161616;
+    --surface-hover: #222;
+    --line: #262626;
+    --text: #ededed;
+    --muted: #8a8a8a;
+    --live: #4ade80;
+    --wait: #facc15;
+    --danger: #f87171;
+    --gutter: 24px;
+    --mono: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+  body {
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px var(--gutter) 0;
+    font: var(--mono);
+    color: var(--muted);
+  }
+  main {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 32px var(--gutter);
+    padding: 28px var(--gutter) max(28px, env(safe-area-inset-bottom));
+    max-width: 1400px;
+  }
+  .tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    color: inherit;
+    text-decoration: none;
+    border-radius: 20px;
+    outline: none;
+  }
+  .device {
+    width: 100%;
+    max-width: 240px;
+    padding: 6px;
+    border-radius: 22px;
+    background: #000;
+    box-shadow: 0 0 0 1px #2e2e2e, 0 0 0 2px #111, 0 16px 48px rgba(0, 0, 0, 0.55);
+    transition: transform 160ms cubic-bezier(0.2, 0, 0, 1), box-shadow 160ms ease;
+  }
+  .tile:hover .device, .tile:focus-visible .device {
+    transform: translateY(-3px);
+    box-shadow: 0 0 0 1px #4a4a4a, 0 0 0 2px #111, 0 20px 56px rgba(0, 0, 0, 0.65);
+  }
+  .tile:focus-visible .device { box-shadow: 0 0 0 2px var(--text), 0 20px 56px rgba(0, 0, 0, 0.65); }
+  .screen {
+    position: relative;
+    aspect-ratio: var(--ar, 0.4737);
+    border-radius: 16px;
+    overflow: hidden;
+    background: #050505;
+  }
+  .screen img { width: 100%; height: 100%; display: block; object-fit: cover; opacity: 0; transition: opacity 200ms ease; }
+  .screen img.ready { opacity: 1; }
+  .screen .note {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    text-align: center;
+    font: var(--mono);
+    color: var(--muted);
+  }
+  .screen img.ready + .note { display: none; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 100%;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .tile:hover .badge { background: var(--surface-hover); }
+  .badge .name { overflow: hidden; text-overflow: ellipsis; }
+  .state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    font: var(--mono);
+    color: var(--wait);
+  }
+  .state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .state.live { color: var(--live); }
+  .state.off { color: var(--danger); }
+  .meta {
+    max-width: 100%;
+    margin-top: -8px;
+    font: var(--mono);
+    color: var(--muted);
+    text-align: center;
+    text-wrap: balance;
+    overflow-wrap: anywhere;
+  }
+  .empty {
+    grid-column: 1 / -1;
+    padding: 80px 0;
+    text-align: center;
+    color: var(--muted);
+  }
+  .empty code {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    font: var(--mono);
+    color: var(--text);
+  }
+  @media (max-width: 520px) {
+    :root { --gutter: 16px; }
+    main { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; }
+    .device { padding: 4px; border-radius: 18px; }
+    .screen { border-radius: 14px; }
+    .badge { height: 28px; padding: 0 10px; gap: 8px; font-size: 13px; }
+    .state { font-size: 12px; }
+    .meta { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<header>serve-droid hub</header>
+<main id="grid" aria-live="polite"></main>
+<script>
+  "use strict";
+  const grid = document.getElementById("grid");
+  const tiles = new Map();
+  const FRAME_MS = 1000;
+  const LIST_MS = 5000;
+
+  function el(tag, props = {}, ...children) {
+    const node = Object.assign(document.createElement(tag), props);
+    node.append(...children);
+    return node;
+  }
+
+  function setState(tile, kind, text) {
+    tile.state.className = `state ${kind}`;
+    tile.state.textContent = text;
+  }
+
+  // Poll one small JPEG per tile while it is on screen and the page is visible.
+  async function pump(tile) {
+    while (tiles.get(tile.name) === tile) {
+      if (tile.visible && document.visibilityState === "visible") {
+        try {
+          // Ask for about the tile's pixel size: sharp on HiDPI, small on the wire.
+          const edge = Math.min(768, Math.max(160, Math.round((tile.screen.clientHeight || 400) * devicePixelRatio)));
+          const r = await fetch(`${tile.path}api/frame?max_edge=${edge}`, { cache: "no-store" });
+          const f = await r.json();
+          if (!r.ok || !f.data) throw new Error(f.error || r.statusText);
+          tile.img.src = `data:${f.mimeType};base64,${f.data}`;
+          tile.img.classList.add("ready");
+          tile.screen.style.setProperty("--ar", f.screenWidth / f.screenHeight || 0.4737);
+          setState(tile, "live", "live");
+        } catch {
+          tile.img.classList.remove("ready");
+          tile.note.textContent = "Booting…";
+          setState(tile, "", "waiting");
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, FRAME_MS));
+    }
+  }
+
+  const seen = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const tile = [...tiles.values()].find(t => t.link === entry.target);
+      if (tile) tile.visible = entry.isIntersecting;
+    }
+  });
+
+  // "Samsung Galaxy S10, Android 16" → "Galaxy S10 · Android 16"; it may wrap but never truncates.
+  function shortDevice(device = "") {
+    return (device || "").replace(/^Samsung\s+/, "").replace(/,\s*(Android)/, " · $1");
+  }
+
+  function addTile(session) {
+    const img = el("img", { alt: `${session.name} screen` });
+    const note = el("div", { className: "note", textContent: "Connecting…" });
+    const screen = el("div", { className: "screen" }, img, note);
+    const state = el("span", { className: "state", textContent: "connecting" });
+    const meta = el("div", { className: "meta", textContent: shortDevice(session.device), title: session.device || "" });
+    const link = el("a", { className: "tile", href: session.path, title: `Open ${session.name}` },
+      el("div", { className: "device" }, screen),
+      el("div", { className: "badge" }, el("span", { className: "name", textContent: session.name }), state),
+      meta);
+    const tile = { name: session.name, path: session.path, link, img, note, screen, state, visible: true };
+    tiles.set(session.name, tile);
+    seen.observe(link);
+    pump(tile);
+    return tile;
+  }
+
+  function render(sessions) {
+    const names = new Set(sessions.map(s => s.name));
+    for (const [name, tile] of tiles) {
+      if (!names.has(name)) {
+        seen.unobserve(tile.link);
+        tile.link.remove();
+        tiles.delete(name);
+      }
+    }
+    grid.replaceChildren(...sessions.map(s => (tiles.get(s.name) ?? addTile(s)).link));
+    if (!sessions.length) {
+      grid.append(el("div", { className: "empty" },
+        el("div", { textContent: "No running emulators." }), el("br"),
+        el("code", { textContent: "npx serve-droid start --name NAME" })));
+    }
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch("api/sessions", { cache: "no-store" });
+      const body = await r.json();
+      if (r.ok) render(body.sessions);
+    } catch {
+      // Keep the last list; the next poll retries.
+    }
+  }
+
+  refresh();
+  setInterval(refresh, LIST_MS);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refresh(); });
+</script>
+</body>
+</html>

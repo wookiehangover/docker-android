@@ -1,4 +1,18 @@
 ARG DOCKER_ANDROID_VERSION
+
+#=====================
+# IPv6 loopback fix
+#---------------------
+# The emulator connects its modem over ::1 with AI_ADDRCONFIG, which fails when
+# Docker leaves eth0 without IPv6. Without this preload the radio stays off.
+# See mixins/native/ipv6-loopback-fix.c.
+#=====================
+FROM budtmo/docker-android:base_${DOCKER_ANDROID_VERSION} AS ipv6-loopback-fix
+USER root
+COPY mixins/native/ipv6-loopback-fix.c /tmp/
+RUN apt-get -qqy update && apt-get -qqy install --no-install-recommends gcc libc6-dev \
+ && gcc -shared -fPIC -O2 -Wall -o /tmp/ipv6-loopback-fix.so /tmp/ipv6-loopback-fix.c -ldl
+
 FROM budtmo/docker-android:base_${DOCKER_ANDROID_VERSION}
 
 #==================
@@ -81,6 +95,7 @@ RUN mkdir -p ${APP_PATH}
 COPY mixins ${APP_PATH}/mixins
 COPY packages/serve-droid/web-ui ${APP_PATH}/mixins/web-ui
 COPY cli ${APP_PATH}/cli
+COPY --from=ipv6-loopback-fix /tmp/ipv6-loopback-fix.so /usr/local/lib/ipv6-loopback-fix.so
 RUN --mount=type=secret,id=extension,dst=/tmp/extension.sh \
     bash /tmp/extension.sh
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
