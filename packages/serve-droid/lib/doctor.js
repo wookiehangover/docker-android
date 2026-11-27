@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { accessSync, constants, existsSync, readdirSync, readFileSync, statfsSync, statSync } from 'node:fs';
 import { freemem, homedir } from 'node:os';
 import { delimiter, dirname, join, parse } from 'node:path';
-import { imageTags } from './docker.js';
+import { imageRevision, imageTags, revisionLabel } from './docker.js';
 import { kvmHelp } from './kvm.js';
 import { pythonCandidates, pythonPaths } from './native.js';
 import { listSessions } from './sessions.js';
@@ -133,11 +133,23 @@ function dockerChecks(add, { kvmPath }) {
 
   let image;
   if (daemon) {
-    image = imageTags(defaultAndroid).find(tag => probe('docker', ['image', 'ls', '-q', tag]).out);
-    add('image', image ? 'ok' : 'warn',
-      image ? `Android ${defaultAndroid.replace('.0', '')} image ${image}`
-        : `No Android ${defaultAndroid.replace('.0', '')} image yet; the first start builds it and takes several minutes`,
-      'serve-droid start (builds the image once)');
+    const android = defaultAndroid.replace('.0', '');
+    const found = imageTags(defaultAndroid).map(tag => {
+      const raw = probe('docker', ['image', 'inspect', '--format', '{{json .Config.Labels}}', tag]);
+      if (!raw.ok) return null;
+      let labels = null;
+      try { labels = JSON.parse(raw.out); } catch { /* no labels */ }
+      return { tag, current: labels?.[revisionLabel] === imageRevision() };
+    }).filter(Boolean);
+    image = found.find(entry => entry.current)?.tag;
+    if (image) add('image', 'ok', `Android ${android} image ${image}`);
+    else if (found.length) {
+      add('image', 'warn', `Android ${android} image ${found[0].tag} out of date — next start rebuilds it`,
+        'serve-droid start (rebuilds the image)');
+    } else {
+      add('image', 'warn', `No Android ${android} image yet; the first start builds it and takes several minutes`,
+        'serve-droid start (builds the image once)');
+    }
   }
 
   if (!version.missing) {

@@ -7,7 +7,7 @@ import { isIP } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline/promises';
-import { apiLevels, docker, emulatorImage, ensureCustomImage, inspectContainer } from '../lib/docker.js';
+import { apiLevels, docker, emulatorImage, ensureCustomImage, imageId, inspectContainer } from '../lib/docker.js';
 import { kvmHelp } from '../lib/kvm.js';
 import { nativeLaunch, nativeState, showFiles } from '../lib/native.js';
 import { containerToken, containerUrl, listSessions, native, owner, projectName, readNativeState, resolveUrl, withToken } from '../lib/sessions.js';
@@ -98,6 +98,7 @@ function checkContainer(container, name, options) {
   if (options.token && !containerToken(container)) {
     throw new Error(`${name} is running without a token. Stop it first to restart it with --token.`);
   }
+  return settings;
 }
 
 function createContainer(name, options) {
@@ -380,9 +381,18 @@ async function startEmulator(name, values) {
   if (native) return launchNative('start', name, values);
   if (!existsSync('/dev/kvm')) throw new Error(kvmHelp());
   const containerName = `serve-droid-${name}`;
-  const container = inspectContainer(containerName);
-  if (container) checkContainer(container, name, values);
-  const id = container?.Id ?? createContainer(name, values);
+  let container = inspectContainer(containerName);
+  let options = values;
+  const settings = container && checkContainer(container, name, values);
+  // A container on an older emulator image moves to the current one. The volumes keep apps and data.
+  // --image containers keep their image.
+  if (settings && !settings.image && imageId(emulatorImage(settings.android)) !== container.Image) {
+    console.error(`Moving ${name} to the new emulator image. Its apps and data are kept.`);
+    await stopContainer(container);
+    options = { ...values, host: settings.host, port: settings.port, token: values.token || Boolean(containerToken(container)) };
+    container = null;
+  }
+  const id = container?.Id ?? createContainer(name, options);
   if (!container?.State.Running) {
     try {
       docker('start', id);
