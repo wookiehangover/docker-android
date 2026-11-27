@@ -1,0 +1,46 @@
+name: serve-droid CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: serve-droid-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout the repo
+      uses: actions/checkout@v7
+
+    - name: Set up Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: 22
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    - name: Syntax-check package JavaScript
+      run: |
+        find packages/serve-droid -path '*/node_modules' -prune -o \( -name '*.js' -o -name '*.mjs' \) -print0 \
+          | xargs -0 -n1 node --check
+
+    - name: Compile web UI Python
+      run: python -m py_compile packages/serve-droid/web-ui/*.py
+
+    - name: Lint web UI Python
+      run: pipx run ruff==0.17.6 check packages/serve-droid/web-ui
+
+    - name: Validate the tool manifest
+      run: node .github/scripts/check-tools-manifest.mjs packages/serve-droid/web-ui/tools.json
