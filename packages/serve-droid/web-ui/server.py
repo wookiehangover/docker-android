@@ -27,6 +27,7 @@ from PIL import Image
 sys.path.insert(0, os.environ.get("EMULATOR_PROTO_PATH", os.path.dirname(__file__)))
 import emulator_controller_pb2 as pb  # noqa: E402
 import emulator_controller_pb2_grpc as rpc  # noqa: E402
+import video  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_EDGE = int(os.environ.get("WEB_UI_MAX_EDGE", "1280"))
@@ -215,6 +216,8 @@ class Emulator:
         self.connected = asyncio.Event()
         self.clipboard = None
         self.sockets = set()
+        self.jpeg_viewers = set()
+        self.video = video.VideoCapture(self.display_size)
         self.events = EventLog(self)
 
     def metadata(self, method):
@@ -283,7 +286,7 @@ class Emulator:
 
     def viewers_changed(self) -> None:
         """Call after adding or removing a viewer socket, so the screen stream can switch size."""
-        if bool(self.sockets) != self.stream_full:
+        if bool(self.jpeg_viewers) != self.stream_full:
             self.restream.set()
 
     async def stream(self, full: bool) -> None:
@@ -291,7 +294,10 @@ class Emulator:
         fmt = pb.ImageFormat(format=pb.ImageFormat.RGB888, width=edge, height=edge)
         async for img in self.stub.streamScreenshot(fmt, metadata=self.metadata("streamScreenshot")):
             async with self.frame_ready:
-                self.rotation = int(img.format.rotation.rotation)
+                rotation = int(img.format.rotation.rotation)
+                if rotation != self.rotation:
+                    self.rotation = rotation
+                    self.video.restart()
                 self.frame = (img, self.rotation)
                 self.frame_full = full
                 self.frame_seq += 1
@@ -300,15 +306,16 @@ class Emulator:
     async def pump_frames(self) -> None:
         """Keep the latest raw frame; encode only when a viewer or an API call asks for it.
 
-        With no viewer the stream is a tiny thumbnail that only tracks rotation, so a changing
-        screen costs almost nothing. The first viewer switches it to full size.
+        With no JPEG viewer the stream is a tiny thumbnail that only tracks rotation, so a changing
+        screen costs almost nothing. The first JPEG viewer switches it to full size. H.264 viewers
+        get their frames from screenrecord (video.py) and leave the stream at thumbnail size.
         """
         while True:
             await self.connect()
             try:
                 while True:
                     self.restream.clear()
-                    self.stream_full = bool(self.sockets)
+                    self.stream_full = bool(self.jpeg_viewers)
                     reader = asyncio.create_task(self.stream(self.stream_full))
                     switch = asyncio.create_task(self.restream.wait())
                     await asyncio.wait({reader, switch}, return_when=asyncio.FIRST_COMPLETED)
@@ -1122,17 +1129,34 @@ class Wheel:
             self.task.cancel()
 
 
+async def seed_jpeg(emu: Emulator) -> bytes:
+    """A still for an H.264 viewer to paint before its first keyframe decodes."""
+    edge = min(MAX_EDGE, max(emu.lcd))
+    img = emu.frame[0] if emu.frame and emu.frame_full else await emu.call(
+        "getScreenshot", pb.ImageFormat(format=pb.ImageFormat.RGB888, width=edge, height=edge), timeout=10)
+    jpeg, _, _ = await asyncio.get_running_loop().run_in_executor(None, emu.encode, img, edge)
+    return jpeg
+
+
 async def socket(request: web.Request) -> web.WebSocketResponse:
+    """Viewer socket. `?codec=h264` asks for H.264 (video.py); else, or when it is unavailable, JPEG frames.
+
+    The first message says which: `{t:"codec", codec:"h264"|"jpeg"}`. It can switch to jpeg later if
+    screenrecord fails. Binary messages are a JPEG per frame, or `[tag][payload]` for H.264.
+    """
     if cross_site(request):
         raise web.HTTPForbidden()
     emu: Emulator = request.app["emu"]
     ws = web.WebSocketResponse(heartbeat=20)
     await ws.prepare(request)
     emu.sockets.add(ws)
-    emu.viewers_changed()
     gestures, wheel = GestureRecorder(emu), Wheel(emu)
+    h264 = request.query.get("codec") == "h264" and emu.video.available()
 
     async def send_frames():
+        emu.jpeg_viewers.add(ws)
+        emu.viewers_changed()
+        await ws.send_str(json.dumps({"t": "codec", "codec": "jpeg"}))
         seq, meta = -1, None
         while not ws.closed:
             async with emu.frame_ready:
@@ -1144,10 +1168,29 @@ async def socket(request: web.Request) -> web.WebSocketResponse:
                 await ws.send_str(json.dumps({"t": "frame", "w": w, "h": h, "rotation": rot}))
             await ws.send_bytes(jpeg)
 
-    if emu.clipboard is not None:
-        await ws.send_str(json.dumps({"t": "clipboard", "text": emu.clipboard}))
-    sender = asyncio.create_task(send_frames())
+    async def send_video():
+        await ws.send_str(json.dumps({"t": "codec", "codec": "h264"}))
+        viewer = emu.video.subscribe()
+        try:
+            if not viewer.replayed:
+                try:
+                    await ws.send_bytes(bytes([video.TAG_SEED]) + await seed_jpeg(emu))
+                except (grpc.aio.AioRpcError, RuntimeError, TypeError) as e:
+                    logger.info(f"no seed frame: {e}")
+            while not ws.closed:
+                message = await viewer.queue.get()
+                if message is None:
+                    break
+                await ws.send_bytes(message)
+        finally:
+            emu.video.unsubscribe(viewer)
+        if not ws.closed:
+            await send_frames()
+
     try:
+        sender = asyncio.create_task(send_video() if h264 else send_frames())
+        if emu.clipboard is not None:
+            await ws.send_str(json.dumps({"t": "clipboard", "text": emu.clipboard}))
         async for msg in ws:
             if msg.type != WSMsgType.TEXT:
                 continue
@@ -1173,10 +1216,13 @@ async def socket(request: web.Request) -> web.WebSocketResponse:
                 elif kind == "rotate":
                     await emu.rotate()
                     emu.events.add("ui", "rotate", {})
+                elif kind == "keyframe":
+                    emu.video.request_keyframe()
             except (ValueError, KeyError, TypeError, AttributeError) as e:
                 logger.warning(f"ignored malformed message: {e}")
     finally:
         emu.sockets.discard(ws)
+        emu.jpeg_viewers.discard(ws)
         emu.viewers_changed()
         sender.cancel()
         wheel.cancel()

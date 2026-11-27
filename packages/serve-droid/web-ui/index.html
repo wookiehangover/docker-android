@@ -583,6 +583,96 @@
   function setState(live) {
     state.textContent = live ? "live" : "connecting";
     state.classList.toggle("live", live);
+    state.title = live ? (codec === "h264" ? "H.264 video" : "JPEG frames") : "";
+  }
+
+  // Video. `?codec=jpeg|h264` picks one; by default H.264 when WebCodecs is available (secure contexts only:
+  // https or localhost). The server says which it sends: {t:"codec"}. H.264 binary messages are [tag][payload]:
+  // 1 avcC config, 2 keyframe, 3 delta, 4 JPEG seed still.
+  const codecParam = new URLSearchParams(location.search).get("codec");
+  let wantH264 = codecParam !== "jpeg" && typeof VideoDecoder === "function";
+  let codec = "jpeg", decoder = null, videoConfig = null, needKey = true, chunkTime = 0, videoShown = false;
+  let held = null; // frames that arrive while a new config is being checked, decoded once it is applied
+  const supportedCodecs = new Set();
+
+  function closeDecoder() {
+    if (decoder && decoder.state !== "closed") decoder.close();
+    decoder = null;
+    videoConfig = null;
+    held = null;
+    needKey = true;
+  }
+
+  function newDecoder() {
+    decoder = new VideoDecoder({
+      output(frame) {
+        videoShown = true;
+        if (frame.displayWidth !== canvas.width || frame.displayHeight !== canvas.height) setShape(frame.displayWidth, frame.displayHeight);
+        ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+        frame.close();
+        setState(true);
+      },
+      error(e) {
+        console.warn("H.264 decoder error; waiting for a keyframe", e);
+        const config = videoConfig;
+        closeDecoder();
+        if (config) configureVideo(config.description);
+        send({ t: "keyframe" });
+      },
+    });
+  }
+
+  function applyConfig(config) {
+    if (!decoder || decoder.state === "closed") newDecoder();
+    decoder.configure(config);
+    needKey = true;
+  }
+
+  async function configureVideo(avcc) {
+    const hex = (b) => b.toString(16).padStart(2, "0");
+    const config = { codec: `avc1.${hex(avcc[1])}${hex(avcc[2])}${hex(avcc[3])}`, description: avcc.slice(), optimizeForLatency: true };
+    if (videoConfig && videoConfig.description.length === avcc.length && videoConfig.description.every((v, i) => v === avcc[i])
+        && decoder && decoder.state === "configured") return;
+    videoConfig = config;
+    if (supportedCodecs.has(config.codec)) return applyConfig(config);
+    held = [];
+    const supported = await VideoDecoder.isConfigSupported(config).then((r) => r.supported, () => false);
+    if (videoConfig !== config) return;
+    if (!supported) {
+      console.warn(`${config.codec} is not supported here; using JPEG`);
+      wantH264 = false;
+      closeDecoder();
+      ws.close();
+      return;
+    }
+    supportedCodecs.add(config.codec);
+    applyConfig(config);
+    const frames = held;
+    held = null;
+    for (const buf of frames) videoMessage(buf);
+  }
+
+  function videoMessage(buf) {
+    const tag = new Uint8Array(buf, 0, 1)[0], body = new Uint8Array(buf, 1);
+    if (tag === 4) {
+      if (videoShown) return;
+      setState(true);
+      pending = new Blob([body], { type: "image/jpeg" });
+      draw();
+    } else if (tag === 1) {
+      configureVideo(body);
+    } else if (held && (tag === 2 || tag === 3)) {
+      held.push(buf);
+    } else if ((tag === 2 || tag === 3) && decoder && decoder.state === "configured") {
+      if (tag === 3 && needKey) return;
+      if (decoder.decodeQueueSize > 60) {
+        needKey = true;
+        send({ t: "keyframe" });
+        return;
+      }
+      needKey = false;
+      decoder.decode(new EncodedVideoChunk({ type: tag === 2 ? "key" : "delta", timestamp: (chunkTime += 16667), data: body }));
+    }
   }
 
   function setShape(w, h, fromFrame = true) {
@@ -609,22 +699,27 @@
   }
 
   function connect() {
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${location.pathname.replace(/\/$/, "")}/ws`);
-    ws.binaryType = "blob";
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${location.pathname.replace(/\/$/, "")}/ws${wantH264 ? "?codec=h264" : ""}`);
+    ws.binaryType = "arraybuffer";
+    codec = "jpeg";
+    videoShown = false;
     ws.onopen = () => { retry = 0; loadInfo(); if (eventsWanted()) loadEvents(); };
     ws.onmessage = (e) => {
       if (typeof e.data === "string") {
         const m = JSON.parse(e.data);
         if (m.t === "frame") setShape(m.w, m.h);
+        else if (m.t === "codec") { codec = m.codec; if (codec !== "h264") closeDecoder(); }
         else if (m.t === "clipboard") receiveClipboard(m.text);
         else if (m.t === "event") addEvent(m.event);
         return;
       }
+      if (codec === "h264") return videoMessage(e.data);
       setState(true);
-      pending = e.data;
+      pending = new Blob([e.data], { type: "image/jpeg" });
       draw();
     };
     ws.onclose = () => {
+      closeDecoder();
       setState(false);
       setTimeout(connect, Math.min(4000, 250 * 2 ** retry++));
     };
