@@ -48,7 +48,8 @@
   "scripts": {
     "release": "node scripts/release.mjs",
     "test:e2e": "bash test/lifecycle.sh",
-    "test:webmcp": "node test/webmcp.mjs"
+    "test:webmcp": "node test/webmcp.mjs",
+    "test:agent": "node test/agent.mjs"
   },
   "repository": {
     "type": "git",

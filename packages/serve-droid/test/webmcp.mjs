@@ -138,6 +138,39 @@ try {
   assert.ok(events.some((e) => e.source === "api" && e.action === "tap" && e.ok), "tap is in the event log");
   assert.ok(events.some((e) => e.action === "clipboard"), "clipboard is in the event log");
 
+  // Device controls (T2 endpoints) through the same WebMCP tools.
+  await must("type_text", { text: "serve droid" });
+  await must("open_url", { url: "https://example.com/" });
+  await sleep(1500);
+  await must("set_battery", { level: 42, charging: false });
+  assert.equal((await must("get_device_info")).battery?.level, 42, "set_battery level");
+  await must("set_battery", { level: 100, charging: true });
+  await must("set_location", { lat: 37.422, lng: -122.084 });
+  const apps = await must("list_apps", { all: true });
+  assert.ok(apps.packages.includes("com.android.settings"), "list_apps all includes Settings");
+  await must("manage_app", { action: "launch", package: "com.android.settings" });
+  await must("manage_app", { action: "stop", package: "com.android.settings" });
+  const snaps = await must("snapshot", { action: "list" });
+  assert.ok(Array.isArray(snaps.snapshots), "snapshot list");
+  await must("touch_fingerprint", {});
+  const net = await must("set_network", {});
+  assert.equal(typeof net.airplane, "boolean", "set_network read");
+  assert.equal((await must("set_network", { speed: "lte" })).speed, "lte");
+  await must("set_network", { speed: "full" });
+  const a11y = await must("set_accessibility", {});
+  assert.ok(typeof a11y.font_scale === "number", "set_accessibility read");
+  assert.equal((await must("set_accessibility", { font_scale: 1.15 })).font_scale, 1.15);
+  await must("set_accessibility", { font_scale: 1 });
+  const sh = await must("run_shell", { command: "echo webmcp" });
+  assert.equal(sh.output.trim(), "webmcp");
+  assert.equal(sh.exit_code, 0);
+  await must("send_sms", { number: "5551234", text: "hello from webmcp" });
+  await must("phone_call", { number: "5551234" });
+  await sleep(2000);
+  await must("phone_call", { number: "5551234", action: "end" });
+  await must("press_key", { key: "GoHome" });
+  await sleep(1000);
+
   const off = await run("tap", { x: w + 10, y: 10 });
   assert.ok(off.failed && /outside/.test(off.message), "tap outside the screen is rejected");
   const badLevel = await run("read_logcat", { level: "Q" });
@@ -169,7 +202,7 @@ try {
   await page.screenshot({ path: join(artifact, "page-rotated.png") });
   console.error("WebMCP E2E passed");
 } finally {
-  for (; rotations > 0 && rotations < 4; rotations++) { await run("rotate"); await sleep(2000); }
+  if (rotations % 2) { await run("rotate"); await sleep(2000); }
   await run("press_key", { key: "GoHome" });
   writeFileSync(join(artifact, "calls.json"), JSON.stringify(log, null, 2));
   console.log(artifact);
