@@ -34,7 +34,6 @@
     font: var(--mono);
     color: var(--muted);
   }
-  header .count { margin-left: auto; }
   main {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -115,11 +114,11 @@
   .meta {
     max-width: 100%;
     margin-top: -8px;
-    overflow: hidden;
     font: var(--mono);
     color: var(--muted);
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    text-align: center;
+    text-wrap: balance;
+    overflow-wrap: anywhere;
   }
   .empty {
     grid-column: 1 / -1;
@@ -149,12 +148,11 @@
 </style>
 </head>
 <body>
-<header><span>serve-droid hub</span><span class="count" id="count"></span></header>
+<header>serve-droid hub</header>
 <main id="grid" aria-live="polite"></main>
 <script>
   "use strict";
   const grid = document.getElementById("grid");
-  const count = document.getElementById("count");
   const tiles = new Map();
   const FRAME_MS = 1000;
   const LIST_MS = 5000;
@@ -201,12 +199,17 @@
     }
   });
 
+  // "Samsung Galaxy S10, Android 16" → "Galaxy S10 · Android 16"; it may wrap but never truncates.
+  function shortDevice(device = "") {
+    return (device || "").replace(/^Samsung\s+/, "").replace(/,\s*(Android)/, " · $1");
+  }
+
   function addTile(session) {
     const img = el("img", { alt: `${session.name} screen` });
     const note = el("div", { className: "note", textContent: "Connecting…" });
     const screen = el("div", { className: "screen" }, img, note);
     const state = el("span", { className: "state", textContent: "connecting" });
-    const meta = el("div", { className: "meta", textContent: session.device || "", title: session.device || "" });
+    const meta = el("div", { className: "meta", textContent: shortDevice(session.device), title: session.device || "" });
     const link = el("a", { className: "tile", href: session.path, title: `Open ${session.name}` },
       el("div", { className: "device" }, screen),
       el("div", { className: "badge" }, el("span", { className: "name", textContent: session.name }), state),
@@ -233,7 +236,6 @@
         el("div", { textContent: "No running emulators." }), el("br"),
         el("code", { textContent: "npx serve-droid start --name NAME" })));
     }
-    count.textContent = sessions.length === 1 ? "1 emulator" : `${sessions.length} emulators`;
   }
 
   async function refresh() {
@@ -242,7 +244,7 @@
       const body = await r.json();
       if (r.ok) render(body.sessions);
     } catch {
-      count.textContent = "hub unreachable";
+      // Keep the last list; the next poll retries.
     }
   }
 
