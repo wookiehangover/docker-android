@@ -13,8 +13,9 @@ import { nativeLaunch, nativeState, showFiles } from '../lib/native.js';
 import { containerToken, containerUrl, listSessions, native, owner, projectName, readNativeState, resolveUrl, withToken } from '../lib/sessions.js';
 import { actionHelp, actionOptions, actionVerbs, runAction } from '../lib/actions.js';
 import { runMcp } from '../lib/mcp.js';
+import { hubToken, startHub } from '../lib/hub.js';
 
-const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach|mcp|ACTION] [options]
+const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach|mcp|hub|ACTION] [options]
 
 Start or reuse the project's Android emulator and print its browser URL.
 Stop shuts the emulator down and keeps its Android data for the next start.
@@ -26,6 +27,8 @@ Stop shuts the emulator down and keeps its Android data for the next start.
   rm                Stop the emulator and delete its saved data (-y to skip the prompt)
   attach            Start or reuse a native Android emulator in the foreground
   mcp               Serve MCP over stdio for agents (--name, --url, --start boots the emulator first)
+  hub               One page for every running emulator, each proxied under /d/NAME/ on one port
+                    (--host, --port default 6089, --token)
   --serial SERIAL   Native emulator to use on macOS and Windows (example: emulator-5554)
   --name NAME       Select a named emulator (default: current project)
   --device PROFILE  Device profile (default: Samsung Galaxy S10)
@@ -185,7 +188,7 @@ function parseCommand() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: lifecycleOptions });
   if (values.help) return { command: 'help' };
   const [command = 'start'] = positionals;
-  if (positionals.length > 1 || !['start', 'stop', 'ls', 'logs', 'rm', 'attach'].includes(command)) throw new Error(help);
+  if (positionals.length > 1 || !['start', 'stop', 'ls', 'logs', 'rm', 'attach', 'hub'].includes(command)) throw new Error(help);
   if (command === 'ls') {
     if (Object.keys(values).length) throw new Error('ls takes no options.');
     return { command };
@@ -197,7 +200,7 @@ function parseCommand() {
     throw new Error('Native emulator startup accepts --serial, --port, --name, --apk and --token.');
   }
   if (!native && command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
-  const only = { stop: ['name'], logs: ['name', 'follow'], rm: ['name', 'yes'] }[command];
+  const only = { stop: ['name'], logs: ['name', 'follow'], rm: ['name', 'yes'], hub: ['host', 'port', 'token'] }[command];
   const extra = Object.keys(values).filter(key => !(only ?? ['name', 'serial', 'port', 'device', 'android', 'host', 'apk', 'image', 'token']).includes(key));
   if (extra.length) throw new Error(`--${extra[0]} does not apply to ${command}.`);
   const name = values.name ?? projectName();
@@ -410,6 +413,11 @@ async function main() {
     const url = resolveUrl({ name: values.name, url: values.url });
     process.exitCode = await runAction(command, args, values, url);
     return;
+  }
+  if (command === 'hub') {
+    const { url } = await startHub({ host: values.host, port: values.port, token: values.token ? hubToken() : undefined });
+    console.error('Serving every running emulator. Stop with Ctrl-C.');
+    return console.log(url);
   }
   if (command === 'logs') return showLogs(name, values.follow);
   if (command === 'rm') return remove(name, values.yes);
