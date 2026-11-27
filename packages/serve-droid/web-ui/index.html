@@ -103,6 +103,9 @@
     outline: none;
     touch-action: none;
     cursor: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
   .touch-dot {
     position: absolute;
@@ -126,6 +129,7 @@
     transition: transform 120ms ease, background-color 120ms ease;
   }
   .touch-dot.on { opacity: 1; }
+  .touch-dot.pair span { background: rgba(255, 255, 255, 0.12); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.6), 0 1px 8px rgba(0, 0, 0, 0.35); }
   .touch-dot.down span { transform: scale(0.8); background: rgba(255, 255, 255, 0.45); }
   .screen canvas { width: 100%; height: 100%; display: block; }
   .toolbar { display: flex; gap: 10px; }
@@ -181,8 +185,8 @@
   .tab { display: flex; flex-direction: column; gap: 24px; }
   .tab[hidden] { display: none; }
   .log-open { --panel: min(620px, 46vw); }
-  .log-open .panel { overflow: hidden; }
-  #tab-logcat { flex: 1; min-height: 0; gap: 10px; }
+  .log-open .panel, .events-open .panel { overflow: hidden; }
+  #tab-logcat, #tab-events { flex: 1; min-height: 0; gap: 10px; }
   .log-tools { display: flex; gap: 8px; }
   .log-tools input { flex: 1; }
   .log-tools select {
@@ -203,6 +207,7 @@
     color: var(--muted);
   }
   .log-tools button:hover, .log-tools button[aria-pressed="true"] { color: var(--text); }
+  .log-tools button:disabled { opacity: 0.4; cursor: default; }
   .log-tools button svg { width: 18px; height: 18px; }
   .log-app { color: var(--muted); }
   .log {
@@ -226,6 +231,9 @@
   .log .I .lv { color: var(--live); }
   .log .W .lv, .log .W .msg { color: var(--wait); }
   .log .E .lv, .log .E .msg, .log .F .lv, .log .F .msg, .log .A .lv, .log .A .msg { color: var(--danger); }
+  .log .src { color: #5c5c5c; }
+  .log .act { color: #b5b5b5; font-weight: 600; }
+  .log .fail .act, .log .fail .msg { color: var(--danger); }
   .log-empty { margin: 24px 0; text-align: center; color: var(--muted); font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
   .scrim { display: none; }
   section h2 {
@@ -334,6 +342,22 @@
     font: inherit;
   }
   .wide.set { width: auto; flex: none; padding: 0 14px; }
+  .wide:disabled { opacity: 0.5; cursor: default; }
+  .stack { display: flex; flex-direction: column; gap: 8px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .sub { margin: 10px 0 6px; color: var(--muted); }
+  .list { list-style: none; margin: 0 -8px; padding: 0; max-height: 252px; overflow-y: auto; overscroll-behavior: contain; }
+  .list li { display: flex; align-items: center; gap: 2px; min-height: 36px; padding: 0 2px 0 8px; border-radius: 8px; }
+  .list li:hover { background: var(--surface); }
+  .list .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .list .meta { flex: none; margin-right: 4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .list button { flex: none; width: 28px; height: 28px; border-radius: 6px; color: var(--muted); }
+  .list button:hover { color: var(--text); }
+  .list button.confirm { color: var(--danger); background: rgba(248, 113, 113, 0.12); }
+  .list button svg { width: 16px; height: 16px; }
+  .list .empty { color: var(--muted); }
+  .list .empty:hover { background: none; }
+  .filter { margin-bottom: 6px; }
   .note { margin: 6px 0 0; font-size: 13px; color: var(--muted); min-height: 0; }
   .note:empty { display: none; }
   .note.error { color: var(--danger); }
@@ -414,6 +438,7 @@
   <div class="segmented panel-tabs" role="tablist" aria-label="Panel">
     <button role="tab" data-tab="controls" aria-controls="tab-controls" aria-selected="true" aria-pressed="true">Controls</button>
     <button role="tab" data-tab="logcat" aria-controls="tab-logcat" aria-selected="false" aria-pressed="false">Logcat</button>
+    <button role="tab" data-tab="events" aria-controls="tab-events" aria-selected="false" aria-pressed="false">Events</button>
   </div>
   <div class="tab" id="tab-controls" role="tabpanel">
   <section>
@@ -438,12 +463,40 @@
     <p class="note" id="url-note"></p>
   </section>
   <section>
+    <h2>Apps<button id="apps-refresh" aria-label="Refresh apps" title="Refresh"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/></svg></button></h2>
+    <input id="apps-filter" class="filter" type="text" placeholder="Filter" aria-label="Filter apps" spellcheck="false" autocomplete="off" hidden>
+    <ul class="list" id="apps" aria-label="Apps"></ul>
+    <div class="row"><span><label for="apps-all">System apps</label></span><input id="apps-all" class="switch" type="checkbox"></div>
+    <p class="note" id="apps-note"></p>
+  </section>
+  <section>
+    <h2>Install app</h2>
+    <button class="wide" id="apk-pick">Choose APK…</button>
+    <input id="apk" type="file" accept=".apk,application/vnd.android.package-archive" hidden>
+    <p class="note" id="apk-note">Or drop an APK on the screen.</p>
+  </section>
+  <section>
+    <h2>Snapshots<button id="snaps-refresh" aria-label="Refresh snapshots" title="Refresh"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/></svg></button></h2>
+    <ul class="list" id="snaps" aria-label="Snapshots"></ul>
+    <form class="field" id="snap-form" style="margin-top: 6px">
+      <input id="snap-name" type="text" placeholder="Snapshot name" aria-label="Snapshot name" spellcheck="false" autocomplete="off">
+      <button class="wide set" id="snap-save">Save</button>
+    </form>
+    <p class="note" id="snaps-note"></p>
+  </section>
+  <section>
     <h2>Appearance</h2>
     <div class="segmented" role="group" aria-label="Appearance">
       <button data-dark="false" aria-pressed="false">Light</button>
       <button data-dark="true" aria-pressed="false">Dark</button>
     </div>
     <p class="note" id="appearance-note"></p>
+  </section>
+  <section>
+    <h2>Accessibility</h2>
+    <div class="row"><span><label for="font-scale">Font size</label></span><span id="font-scale-value">–</span></div>
+    <input id="font-scale" type="range" min="0" max="6" step="1" value="1" aria-valuetext="Default">
+    <p class="note" id="a11y-note"></p>
   </section>
   <section>
     <h2><label for="battery">Battery</label><span id="battery-value"></span></h2>
@@ -461,10 +514,34 @@
     <p class="note" id="loc-note"></p>
   </section>
   <section>
-    <h2>Install app</h2>
-    <button class="wide" id="apk-pick">Choose APK…</button>
-    <input id="apk" type="file" accept=".apk,application/vnd.android.package-archive" hidden>
-    <p class="note" id="apk-note">Or drop an APK on the screen.</p>
+    <h2>Network</h2>
+    <div class="row"><span><label for="net-airplane">Airplane mode</label></span><input id="net-airplane" class="switch" type="checkbox"></div>
+    <div class="row"><span><label for="net-wifi">Wi-Fi</label></span><input id="net-wifi" class="switch" type="checkbox"></div>
+    <div class="row"><span><label for="net-data">Mobile data</label></span><input id="net-data" class="switch" type="checkbox"></div>
+    <div class="sub" id="net-speed-label">Speed</div>
+    <div class="segmented" role="group" aria-labelledby="net-speed-label">
+      <button data-speed="gsm" aria-pressed="false">GSM</button>
+      <button data-speed="edge" aria-pressed="false">EDGE</button>
+      <button data-speed="umts" aria-pressed="false">3G</button>
+      <button data-speed="lte" aria-pressed="false">LTE</button>
+      <button data-speed="full" aria-pressed="false">Full</button>
+    </div>
+    <p class="note" id="net-note"></p>
+  </section>
+  <section>
+    <h2><label for="phone-number">Phone</label></h2>
+    <div class="stack">
+      <input id="phone-number" type="text" inputmode="tel" value="5551234567" placeholder="Phone number" autocomplete="off" spellcheck="false">
+      <form class="field" id="sms-form">
+        <input id="sms-text" type="text" placeholder="SMS message" aria-label="SMS message" autocomplete="off">
+        <button class="go" aria-label="Send SMS" title="Send SMS"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button>
+      </form>
+      <div class="pair">
+        <button class="wide" id="call">Call</button>
+        <button class="wide" id="hangup">End call</button>
+      </div>
+    </div>
+    <p class="note" id="phone-note"></p>
   </section>
   </div>
   <div class="tab" id="tab-logcat" role="tabpanel" hidden>
@@ -483,13 +560,21 @@
     <div class="row"><span><label for="log-fg">Foreground app only</label> <span class="log-app" id="log-app"></span></span><input id="log-fg" class="switch" type="checkbox"></div>
     <div class="log" id="log" role="log" aria-live="off" tabindex="0"></div>
   </div>
+  <div class="tab" id="tab-events" role="tabpanel" hidden>
+    <div class="log-tools">
+      <input id="ev-filter" type="text" placeholder="Filter" aria-label="Filter events" spellcheck="false" autocomplete="off">
+      <button id="ev-export" aria-label="Export script" title="Export replay script"><svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19.5h14"/></svg></button>
+    </div>
+    <p class="note" id="ev-note"></p>
+    <div class="log" id="events" role="log" aria-live="off" tabindex="0"></div>
+  </div>
 </aside>
 <script>
   const screen = document.getElementById("screen");
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
   const state = document.getElementById("state");
-  let ws, retry = 0, pending = null, decoding = false, shaped = false;
+  let ws, retry = 0, pending = null, decoding = false, shaped = false, deviceSize = null;
 
   function setState(live) {
     state.textContent = live ? "live" : "connecting";
@@ -522,12 +607,13 @@
   function connect() {
     ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${location.pathname.replace(/\/$/, "")}/ws`);
     ws.binaryType = "blob";
-    ws.onopen = () => { retry = 0; loadInfo(); };
+    ws.onopen = () => { retry = 0; loadInfo(); if (eventsWanted()) loadEvents(); };
     ws.onmessage = (e) => {
       if (typeof e.data === "string") {
         const m = JSON.parse(e.data);
         if (m.t === "frame") setShape(m.w, m.h);
         else if (m.t === "clipboard") receiveClipboard(m.text);
+        else if (m.t === "event") addEvent(m.event);
         return;
       }
       setState(true);
@@ -552,7 +638,31 @@
     };
   }
 
+  // Pointers. Each finger gets a touch id 0-9. Alt/Option-drag with a mouse adds a second finger mirrored
+  // around the screen centre (pinch, like Android Studio).
   const dot = document.getElementById("touch-dot");
+  const extraDots = new Map();
+  function dotAt(el, p) {
+    const s = screen.getBoundingClientRect(), c = canvas.getBoundingClientRect();
+    el.style.transform = `translate3d(${c.left - s.left + p.x * c.width}px, ${c.top - s.top + p.y * c.height}px, 0)`;
+  }
+  function extraDot(key) {
+    let el = extraDots.get(key);
+    if (!el) {
+      el = dot.cloneNode(true);
+      el.removeAttribute("id");
+      el.classList.add("pair");
+      screen.append(el);
+      extraDots.set(key, el);
+    }
+    return el;
+  }
+  function hideExtra(key) {
+    const el = extraDots.get(key);
+    if (el) el.classList.remove("on", "down");
+  }
+  const mirror = (p) => ({ x: 1 - p.x, y: 1 - p.y });
+  let hovering = null;
   function moveDot(e) {
     if (e.pointerType === "touch") return dot.classList.remove("on");
     const r = screen.getBoundingClientRect();
@@ -560,46 +670,137 @@
     const y = Math.min(r.height, Math.max(0, e.clientY - r.top));
     dot.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     dot.classList.add("on");
+    hovering = point(e);
+    showPairHint(e.altKey);
   }
-  screen.addEventListener("pointerenter", moveDot);
+  function showPairHint(alt) {
+    const f = fingers.get(mousePointer);
+    if (f?.pair !== undefined) return;
+    if (alt && hovering && pointerHere) {
+      const el = extraDot("hint");
+      dotAt(el, mirror(hovering));
+      el.classList.add("on");
+    } else hideExtra("hint");
+  }
+  let pointerHere = false, mousePointer = null;
+  screen.addEventListener("pointerenter", (e) => { pointerHere = true; moveDot(e); });
   screen.addEventListener("pointermove", moveDot);
-  screen.addEventListener("pointerleave", () => { if (pointerId === null) dot.classList.remove("on"); });
+  screen.addEventListener("pointerleave", () => {
+    pointerHere = false;
+    hovering = null;
+    if (!fingers.size) dot.classList.remove("on");
+    hideExtra("hint");
+  });
+  window.addEventListener("keydown", (e) => { if (e.key === "Alt") showPairHint(true); });
+  window.addEventListener("keyup", (e) => { if (e.key === "Alt") showPairHint(false); });
+  window.addEventListener("blur", () => showPairHint(false));
 
-  let pointerId = null, moveQueued = null;
+  const fingers = new Map();
+  const moves = new Map();
+  let moveFrame = 0;
+  function freeId() {
+    const used = new Set();
+    fingers.forEach((f) => { used.add(f.id); if (f.pair !== undefined) used.add(f.pair); });
+    for (let i = 0; i < 10; i++) if (!used.has(i)) return i;
+    return -1;
+  }
+  function sendFinger(f, p, down) {
+    send({ t: "touch", id: f.id, down, ...p });
+    if (f.pair !== undefined) {
+      const m = mirror(p);
+      send({ t: "touch", id: f.pair, down, ...m });
+      const el = extraDot("pinch");
+      dotAt(el, m);
+      el.classList.toggle("on", down);
+      el.classList.toggle("down", down);
+    }
+  }
+  function flushMoves() {
+    moveFrame = 0;
+    moves.forEach((p, pid) => { const f = fingers.get(pid); if (f) sendFinger(f, p, true); });
+    moves.clear();
+  }
   screen.addEventListener("pointerdown", (e) => {
-    if (pointerId !== null) return;
-    pointerId = e.pointerId;
+    const touch = e.pointerType === "touch" || e.pointerType === "pen";
+    if (!touch && (e.button !== 0 || mousePointer !== null)) return;
+    const id = freeId();
+    if (id < 0) return;
+    const f = { id };
+    fingers.set(e.pointerId, f);
+    if (!touch) {
+      mousePointer = e.pointerId;
+      if (e.altKey) {
+        hideExtra("hint");
+        const pair = freeId();
+        if (pair >= 0) f.pair = pair;
+      }
+    }
     screen.setPointerCapture(e.pointerId);
-    dot.classList.add("down");
+    if (!touch) dot.classList.add("down");
     screen.focus({ preventScroll: true });
-    send({ t: "touch", down: true, ...point(e) });
+    sendFinger(f, point(e), true);
   });
   screen.addEventListener("pointermove", (e) => {
-    if (e.pointerId !== pointerId) return;
-    if (!moveQueued) requestAnimationFrame(() => { send({ t: "touch", down: true, ...moveQueued }); moveQueued = null; });
-    moveQueued = point(e);
+    if (!fingers.has(e.pointerId)) return;
+    moves.set(e.pointerId, point(e));
+    if (!moveFrame) moveFrame = requestAnimationFrame(flushMoves);
   });
   const release = (e) => {
-    if (e.pointerId !== pointerId) return;
-    pointerId = null;
-    moveQueued = null;
-    dot.classList.remove("down");
-    const r = screen.getBoundingClientRect();
-    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dot.classList.remove("on");
-    send({ t: "touch", down: false, ...point(e) });
+    const f = fingers.get(e.pointerId);
+    if (!f) return;
+    fingers.delete(e.pointerId);
+    moves.delete(e.pointerId);
+    if (e.pointerId === mousePointer) {
+      mousePointer = null;
+      dot.classList.remove("down");
+      const r = screen.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dot.classList.remove("on");
+    }
+    sendFinger(f, point(e), false);
+    if (e.altKey && pointerHere) showPairHint(true);
   };
   screen.addEventListener("pointerup", release);
   screen.addEventListener("pointercancel", release);
+  screen.addEventListener("lostpointercapture", release);
   screen.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // Wheel scrolls; a trackpad pinch (Chrome sends it as wheel + ctrlKey) zooms with api/pinch.
+  let wheel = null, zoom = null, zoomTimer = 0;
+  screen.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? screen.clientHeight : 1;
+    if (e.ctrlKey) {
+      zoom = zoom || { ...point(e), scale: 1 };
+      zoom.scale *= Math.exp(-e.deltaY * unit / 100);
+      clearTimeout(zoomTimer);
+      zoomTimer = setTimeout(sendZoom, 120);
+      return;
+    }
+    if (!wheel) {
+      wheel = { ...point(e), dx: 0, dy: 0 };
+      requestAnimationFrame(() => { if (wheel.dx || wheel.dy) send({ t: "wheel", ...wheel }); wheel = null; });
+    }
+    wheel.dx += (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit;
+    wheel.dy += (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * unit;
+  }, { passive: false });
+  function sendZoom() {
+    const z = zoom;
+    zoom = null;
+    const scale = Math.min(5, Math.max(0.2, z.scale));
+    if (Math.abs(Math.log(scale)) < 0.05 || !deviceSize) return;
+    const [w, h] = (canvas.width > canvas.height) === (deviceSize[0] > deviceSize[1]) ? deviceSize : [deviceSize[1], deviceSize[0]];
+    post("api/pinch", { x: Math.round(z.x * (w - 1)), y: Math.round(z.y * (h - 1)), scale: +scale.toFixed(3), duration_ms: 300 });
+  }
 
   const specialKeys = new Set(["Backspace", "Enter", "Tab", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
   screen.addEventListener("keydown", (e) => {
-    if (e.metaKey || e.ctrlKey) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "Escape") send({ t: "key", key: "GoBack" });
     else if (specialKeys.has(e.key)) send({ t: "key", key: e.key });
     else if (e.key.length === 1) send({ t: "text", text: e.key });
     else return;
     e.preventDefault();
+    e.stopPropagation();
   });
   screen.addEventListener("paste", (e) => {
     const text = e.clipboardData.getData("text");
@@ -639,10 +840,29 @@
     }
   }
 
+  async function get(path, noteId) {
+    try {
+      const r = await fetch(path);
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error);
+      if (noteId) note(noteId, "");
+      return data;
+    } catch (err) {
+      if (noteId) note(noteId, err.message || "Request failed", true);
+      return null;
+    }
+  }
+
+  function flash(id, text) {
+    note(id, text);
+    setTimeout(() => { if ($(id).textContent === text) note(id, ""); }, 2500);
+  }
+
   async function loadInfo() {
     try {
       const i = await (await fetch("info")).json();
       $("label").textContent = i.label;
+      deviceSize = [i.width, i.height];
       setShape(i.width, i.height, false);
       $("i-model").textContent = i.label;
       const trim = (v) => String(v).replace(/\.0$/, "");
@@ -680,8 +900,9 @@
     if (open) {
       panel.hidden = false;
       loadState();
+      loadControls();
     } else {
-      root.classList.remove("log-open");
+      root.classList.remove("log-open", "events-open");
       const delay = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 240;
       setTimeout(() => { if (!root.classList.contains("panel-open")) panel.hidden = true; }, delay);
     }
@@ -692,25 +913,28 @@
   toggle.addEventListener("click", () => setPanel(!root.classList.contains("panel-open")));
   $("scrim").addEventListener("click", () => setPanel(false));
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && root.classList.contains("panel-open") && matchMedia("(max-width: 899px)").matches) setPanel(false);
+    if (e.key === "Escape" && document.activeElement !== screen && root.classList.contains("panel-open") && matchMedia("(max-width: 899px)").matches) setPanel(false);
   });
   const LEVELS = "VDIWEFA";
   const logEl = $("log");
   let logs = [], logSocket = null, logRetry = 0, paused = false, fgPids = null, fgTimer = null;
   let activeTab = "controls";
 
+  const TABS = ["controls", "logcat", "events"];
   function selectTab(name, save = true) {
-    activeTab = name === "logcat" ? "logcat" : "controls";
+    activeTab = TABS.includes(name) ? name : "controls";
     document.querySelectorAll("[data-tab]").forEach((b) => {
       const on = b.dataset.tab === activeTab;
       b.setAttribute("aria-selected", String(on));
       b.setAttribute("aria-pressed", String(on));
     });
-    $("tab-controls").hidden = activeTab !== "controls";
-    $("tab-logcat").hidden = activeTab !== "logcat";
-    root.classList.toggle("log-open", activeTab === "logcat" && root.classList.contains("panel-open"));
+    TABS.forEach((t) => { $(`tab-${t}`).hidden = activeTab !== t; });
+    const open = root.classList.contains("panel-open");
+    root.classList.toggle("log-open", activeTab === "logcat" && open);
+    root.classList.toggle("events-open", activeTab === "events" && open);
     if (save) localStorage.setItem("tab", activeTab);
     syncLogcat();
+    if (eventsWanted()) loadEvents();
   }
   document.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => selectTab(b.dataset.tab)));
 
@@ -820,7 +1044,6 @@
   });
   $("log-clear").addEventListener("click", () => { logs = []; renderLogs(); });
 
-  setPanel(localStorage.getItem("panel") === "1" || (localStorage.getItem("panel") === null && matchMedia("(min-width: 1200px)").matches), false);
 
   const clip = $("clip");
   let clipTimer = null, clipPending = null;
@@ -882,6 +1105,268 @@
     if (await post("api/location", { lat, lng }, "loc-note")) note("loc-note", "Location set");
   });
 
+  // Apps
+  const ICON = {
+    launch: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
+    stop: '<svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>',
+    clear: '<svg viewBox="0 0 24 24"><path d="M8.5 19 4 14.5 13.5 5l6.5 6.5-7.5 7.5z"/><path d="m8.5 9.5 6 6"/><path d="M8.5 19H20"/></svg>',
+    load: '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4h4"/></svg>',
+    delete: '<svg viewBox="0 0 24 24"><path d="M5 7h14"/><path d="M10 11v6M14 11v6"/><path d="M6.5 7l.8 11a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9l.8-11"/><path d="M9.5 7V5.5a1.5 1.5 0 0 1 1.5-1.5h2a1.5 1.5 0 0 1 1.5 1.5V7"/></svg>',
+  };
+  function actionButton(act, label) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.act = act;
+    b.setAttribute("aria-label", label);
+    b.title = label;
+    b.innerHTML = ICON[act];
+    return b;
+  }
+  function listItem(name, meta, buttons, title) {
+    const li = document.createElement("li");
+    li.dataset.name = name;
+    const n = document.createElement("span");
+    n.className = "name";
+    n.textContent = name;
+    n.title = title || name;
+    li.append(n);
+    if (meta) {
+      const m = document.createElement("span");
+      m.className = "meta";
+      m.textContent = meta;
+      li.append(m);
+    }
+    li.append(...buttons);
+    return li;
+  }
+  function emptyItem(text) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = text;
+    return li;
+  }
+  // Destructive actions take a second click within 3 s instead of a dialog.
+  function confirmed(b, label) {
+    if (b.classList.contains("confirm")) {
+      clearTimeout(b.confirmTimer);
+      b.classList.remove("confirm");
+      return true;
+    }
+    const old = b.title;
+    b.classList.add("confirm");
+    b.title = label;
+    b.setAttribute("aria-label", label);
+    b.confirmTimer = setTimeout(() => { b.classList.remove("confirm"); b.title = old; b.setAttribute("aria-label", old); }, 3000);
+    return false;
+  }
+
+  let apps = [];
+  async function loadApps() {
+    const r = await get($("apps-all").checked ? "api/apps?all=true" : "api/apps", "apps-note");
+    if (!r) return;
+    apps = (r.packages || []).slice().sort();
+    renderApps();
+  }
+  function renderApps() {
+    const many = apps.length > 8;
+    $("apps-filter").hidden = !many;
+    const q = many ? $("apps-filter").value.trim().toLowerCase() : "";
+    const shown = apps.filter((p) => p.toLowerCase().includes(q));
+    $("apps").replaceChildren(...(shown.length
+      ? shown.map((p) => listItem(p, "", [actionButton("launch", "Open"), actionButton("stop", "Force stop"), actionButton("clear", "Clear data")]))
+      : [emptyItem(apps.length ? "No apps match" : "No apps installed")]));
+  }
+  $("apps-refresh").addEventListener("click", loadApps);
+  $("apps-all").addEventListener("change", loadApps);
+  $("apps-filter").addEventListener("input", renderApps);
+  $("apps").addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    const pkg = b.closest("li").dataset.name;
+    const act = b.dataset.act;
+    if (act === "clear" && !confirmed(b, "Click again to clear data")) return;
+    const r = await post("api/app", { action: act, package: pkg }, "apps-note");
+    if (r) flash("apps-note", { launch: `Opened ${pkg}`, stop: `Stopped ${pkg}`, clear: `Cleared data for ${pkg}` }[act]);
+  });
+
+  // Snapshots
+  function snapMeta(s) {
+    if (s.size_bytes) {
+      const mb = s.size_bytes / 1048576;
+      return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+    }
+    return "";
+  }
+  function snapDate(s) {
+    if (s.created === undefined || s.created === null) return "";
+    const t = typeof s.created === "number" ? (s.created < 1e12 ? s.created * 1000 : s.created) : Date.parse(s.created);
+    return Number.isNaN(t) ? "" : new Date(t).toLocaleString();
+  }
+  async function loadSnaps() {
+    const r = await post("api/snapshots", { action: "list" }, "snaps-note");
+    if (!r) return;
+    const snaps = r.snapshots || [];
+    $("snaps").replaceChildren(...(snaps.length
+      ? snaps.map((s) => listItem(s.name, snapMeta(s), [actionButton("load", "Load"), actionButton("delete", "Delete")], [s.name, snapDate(s)].filter(Boolean).join(" · ")))
+      : [emptyItem("No snapshots")]));
+  }
+  $("snaps-refresh").addEventListener("click", loadSnaps);
+  $("snaps").addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    const name = b.closest("li").dataset.name;
+    if (b.dataset.act === "delete") {
+      if (!confirmed(b, "Click again to delete")) return;
+      if (await post("api/snapshots", { action: "delete", name }, "snaps-note")) { flash("snaps-note", `Deleted ${name}`); loadSnaps(); }
+      return;
+    }
+    note("snaps-note", `Loading ${name}…`);
+    if (await post("api/snapshots", { action: "load", name }, "snaps-note")) flash("snaps-note", `Loaded ${name}`);
+  });
+  $("snap-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const d = new Date(), z = (n) => String(n).padStart(2, "0");
+    const name = $("snap-name").value.trim() || `snap-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`;
+    $("snap-save").disabled = true;
+    note("snaps-note", `Saving ${name}…`);
+    const r = await post("api/snapshots", { action: "save", name }, "snaps-note");
+    $("snap-save").disabled = false;
+    if (!r) return;
+    $("snap-name").value = "";
+    flash("snaps-note", `Saved ${name}`);
+    loadSnaps();
+  });
+
+  // Network
+  function showNetwork(n) {
+    if (!n) return;
+    for (const k of ["airplane", "wifi", "data"]) if (typeof n[k] === "boolean") $(`net-${k}`).checked = n[k];
+    document.querySelectorAll("[data-speed]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.speed === n.speed)));
+  }
+  async function setNetwork(change) {
+    showNetwork(await post("api/network", change, "net-note"));
+  }
+  ["airplane", "wifi", "data"].forEach((k) => $(`net-${k}`).addEventListener("change", (e) => setNetwork({ [k]: e.target.checked })));
+  document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("[data-speed]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+    setNetwork({ speed: b.dataset.speed });
+  }));
+
+  // Accessibility
+  const FONT_SCALES = [0.85, 1, 1.15, 1.3, 1.5, 1.8, 2];
+  const FONT_NAMES = ["Small", "Default", "Large", "Larger", "Largest", "Huge", "Huge+"];
+  function showFontScale() {
+    const i = +$("font-scale").value;
+    $("font-scale-value").textContent = `${FONT_SCALES[i]}×`;
+    $("font-scale").setAttribute("aria-valuetext", `${FONT_NAMES[i]}, ${FONT_SCALES[i]} times`);
+  }
+  function showA11y(a) {
+    if (!a || typeof a.font_scale !== "number" || document.activeElement === $("font-scale")) return;
+    let best = 0;
+    FONT_SCALES.forEach((v, i) => { if (Math.abs(v - a.font_scale) < Math.abs(FONT_SCALES[best] - a.font_scale)) best = i; });
+    $("font-scale").value = best;
+    showFontScale();
+  }
+  $("font-scale").addEventListener("input", showFontScale);
+  $("font-scale").addEventListener("change", async () => showA11y(await post("api/accessibility", { font_scale: FONT_SCALES[+$("font-scale").value] }, "a11y-note")));
+
+  // Phone
+  function phoneNumber() {
+    const n = $("phone-number").value.trim();
+    if (!n) note("phone-note", "Enter a phone number", true);
+    return n;
+  }
+  $("sms-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const number = phoneNumber(), text = $("sms-text").value;
+    if (!number) return;
+    if (!text.trim()) return note("phone-note", "Type a message", true);
+    if (await post("api/sms", { number, text }, "phone-note")) { $("sms-text").value = ""; flash("phone-note", `SMS sent from ${number}`); }
+  });
+  $("call").addEventListener("click", async () => {
+    const number = phoneNumber();
+    if (number && await post("api/phone", { number, action: "call" }, "phone-note")) flash("phone-note", `Incoming call from ${number}`);
+  });
+  $("hangup").addEventListener("click", async () => {
+    const number = phoneNumber();
+    if (number && await post("api/phone", { number, action: "end" }, "phone-note")) flash("phone-note", "Call ended");
+  });
+
+  function loadControls() {
+    loadApps();
+    loadSnaps();
+    post("api/network", {}, "net-note").then(showNetwork);
+    post("api/accessibility", {}, "a11y-note").then(showA11y);
+  }
+
+  // Events: every API call and UI gesture, live from the WebSocket.
+  const evEl = $("events");
+  let events = [];
+  function eventsWanted() { return root.classList.contains("panel-open") && activeTab === "events"; }
+  function evText(e) {
+    const params = Object.entries(e.params || {}).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join(" ");
+    return e.ok === false && e.error ? `${params}${params ? " · " : ""}${e.error}` : params;
+  }
+  function evMatches(e) {
+    const q = $("ev-filter").value.trim().toLowerCase();
+    return !q || `${e.source} ${e.action} ${evText(e)}`.toLowerCase().includes(q);
+  }
+  function evNode(e) {
+    const div = document.createElement("div");
+    if (e.ok === false) div.className = "fail";
+    div.innerHTML = '<span class="ts"></span> <span class="src"></span> <span class="act"></span> <span class="msg"></span>';
+    const t = new Date(e.time);
+    div.children[0].textContent = Number.isNaN(t.getTime()) ? "" : t.toLocaleTimeString([], { hour12: false });
+    div.children[1].textContent = e.source || "";
+    div.children[2].textContent = e.action;
+    div.children[3].textContent = evText(e);
+    return div;
+  }
+  function evEmpty() {
+    if (evEl.childElementCount) return;
+    const p = document.createElement("p");
+    p.className = "log-empty";
+    p.textContent = events.length ? "No events match" : "No events yet. Taps, keys and API calls show up here.";
+    evEl.append(p);
+  }
+  function renderEvents() {
+    evEl.replaceChildren(...events.filter(evMatches).map(evNode));
+    evEmpty();
+    evEl.scrollTop = evEl.scrollHeight;
+  }
+  function addEvent(e) {
+    if (!e || events.some((x) => x.id === e.id)) return;
+    events.push(e);
+    if (events.length > 1000) events = events.slice(-1000);
+    if (!eventsWanted() || !evMatches(e)) return;
+    const stick = evEl.scrollTop + evEl.clientHeight >= evEl.scrollHeight - 24;
+    evEl.querySelector(".log-empty")?.remove();
+    evEl.append(evNode(e));
+    while (evEl.childElementCount > 1000) evEl.firstElementChild.remove();
+    if (stick) evEl.scrollTop = evEl.scrollHeight;
+  }
+  async function loadEvents() {
+    const r = await get("api/events?limit=200", "ev-note");
+    if (r) {
+      const known = new Set(events.map((e) => e.id));
+      events = [...events, ...(r.events || []).filter((e) => !known.has(e.id))].sort((a, b) => a.time - b.time).slice(-1000);
+    }
+    renderEvents();
+  }
+  let evTimer = 0;
+  $("ev-filter").addEventListener("input", () => { clearTimeout(evTimer); evTimer = setTimeout(renderEvents, 120); });
+  $("ev-export").addEventListener("click", async () => {
+    const r = await get("api/events/script", "ev-note");
+    if (!r) return;
+    delete r.ok;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(r, null, 2)], { type: "application/json" }));
+    a.download = `serve-droid-script-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    flash("ev-note", `Exported ${r.steps?.length ?? 0} steps`);
+  });
+
   async function install(file) {
     if (!file) return;
     if (!/\.apk$/i.test(file.name)) return note("apk-note", "Choose an .apk file", true);
@@ -911,185 +1396,91 @@
     install(e.dataTransfer.files[0]);
   });
 
+  setPanel(localStorage.getItem("panel") === "1" || (localStorage.getItem("panel") === null && matchMedia("(min-width: 1200px)").matches), false);
   loadInfo().finally(connect);
 </script>
 <script>
   // WebMCP: expose the device to in-browser agents. https://webmachinelearning.github.io/webmcp/
+  // Tools come from the server's manifest (tools.json), shared with `serve-droid mcp`.
   (() => {
     const mc = document.modelContext ?? navigator.modelContext;
     if (!mc?.registerTool) return;
 
-    async function call(path, body, query) {
-      const url = query ? `${path}?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== ""))}` : path;
-      const r = await fetch(url, body === undefined ? {} : {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    const clean = (input) => Object.fromEntries(Object.entries(input || {}).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+    async function call({ method = "POST", path }, input) {
+      const rel = path.replace(/^\/+/, "");
+      const get = method.toUpperCase() === "GET";
+      const query = get ? new URLSearchParams(Object.entries(clean(input)).map(([k, v]) => [k, typeof v === "object" ? JSON.stringify(v) : String(v)])).toString() : "";
+      const r = await fetch(query ? `${rel}?${query}` : rel, get ? {} : {
+        method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(input || {}),
       });
-      const data = await r.json();
-      if (!data.ok) throw new Error(data.error || `${path} failed`);
+      let data;
+      try { data = await r.json(); } catch { throw new Error(`${rel}: HTTP ${r.status}`); }
+      if (!data.ok) throw new Error(data.error || `${rel} failed`);
       delete data.ok;
       return data;
     }
 
-    function showTouch(x, y, screenW, screenH, ms = 220) {
-      const dot = document.getElementById("touch-dot");
-      const s = document.getElementById("screen").getBoundingClientRect();
-      const c = document.getElementById("canvas").getBoundingClientRect();
-      dot.style.transform = `translate3d(${c.left - s.left + (x / screenW) * c.width}px, ${c.top - s.top + (y / screenH) * c.height}px, 0)`;
-      dot.classList.add("on", "down");
-      setTimeout(() => dot.classList.remove("on", "down"), ms);
-    }
-
     let screenSize = null;
-    async function size() {
+    async function oriented() {
       if (!screenSize) {
         const i = await (await fetch("info")).json();
         screenSize = [i.width, i.height];
       }
-      return screenSize;
-    }
-    async function oriented() {
-      const [w, h] = await size();
+      const [w, h] = screenSize;
       const c = document.getElementById("canvas");
       return (c.width > c.height) === (w > h) ? [w, h] : [h, w];
     }
 
-    const point = (desc) => ({ type: "number", minimum: 0, description: desc });
-    const KEYS = ["GoBack", "GoHome", "AppSwitch", "Enter", "Backspace", "Delete", "Tab", "ArrowUp", "ArrowDown",
-      "ArrowLeft", "ArrowRight", "AudioVolumeUp", "AudioVolumeDown", "Power"];
-    const COORDS = "Coordinates are screen pixels in the current orientation, as returned by get_ui_tree and get_screen.";
+    // Show where an agent touches the screen.
+    async function showTouch(x, y, ms = 220) {
+      if (typeof x !== "number" || typeof y !== "number") return;
+      const [w, h] = await oriented();
+      const dot = document.getElementById("touch-dot");
+      const s = document.getElementById("screen").getBoundingClientRect();
+      const c = document.getElementById("canvas").getBoundingClientRect();
+      dot.style.transform = `translate3d(${c.left - s.left + (x / w) * c.width}px, ${c.top - s.top + (y / h) * c.height}px, 0)`;
+      dot.classList.add("on", "down");
+      clearTimeout(showTouch.timer);
+      showTouch.timer = setTimeout(() => dot.classList.remove("on", "down"), ms);
+    }
+    const extras = {
+      async tap(input, run) {
+        const shown = typeof input.x === "number";
+        if (shown) showTouch(input.x, input.y, Math.max(220, input.duration_ms || 0));
+        const r = await run();
+        if (!shown) showTouch(r.x, r.y, Math.max(220, input.duration_ms || 0));
+        return r;
+      },
+      async swipe(input, run) { showTouch(input.x2, input.y2, input.duration_ms || 300); return run(); },
+      async scroll(input, run) { showTouch(input.x, input.y, 400); return run(); },
+      async pinch(input, run) { showTouch(input.x, input.y, input.duration_ms || 400); return run(); },
+    };
 
-    const tools = [
-      {
-        name: "get_device_info",
-        title: "Get device info",
-        description: "Device model, Android version, screen size, the foreground app, and battery, location, dark mode and clipboard state.",
-        inputSchema: { type: "object", properties: {} },
-        annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: async () => {
-          const [info, state, fg, [w, h]] = await Promise.all([fetch("info").then((r) => r.json()), call("api/state"), call("api/foreground"), oriented()]);
-          return { ...info, screenWidth: w, screenHeight: h, foregroundPackage: fg.package, ...state };
-        },
-      },
-      {
-        name: "get_ui_tree",
-        title: "Read the screen layout",
-        description: "List the visible UI elements: class, text, content description, resource id, flags (clickable, editable, scrollable, checked…), and bounds and center in screen pixels. Prefer this over get_screen to find what to tap.",
-        inputSchema: { type: "object", properties: {} },
-        annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: () => call("api/ui-tree"),
-      },
-      {
-        name: "get_screen",
-        title: "Capture the screen",
-        description: "Capture the current screen as a base64 JPEG. The image can be smaller than the screen: scale points by screenWidth / width before tapping.",
-        inputSchema: { type: "object", properties: { max_edge: { type: "integer", minimum: 160, maximum: 1280, default: 768, description: "Longest image edge in pixels." } } },
-        annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: ({ max_edge } = {}) => call("api/frame", undefined, { max_edge }),
-      },
-      {
-        name: "tap",
-        title: "Tap",
-        description: `Tap a point on the screen. Set duration_ms to 600 or more for a long press. ${COORDS}`,
-        inputSchema: { type: "object", properties: { x: point("X in pixels."), y: point("Y in pixels."), duration_ms: { type: "integer", minimum: 40, maximum: 5000, default: 60 } }, required: ["x", "y"] },
-        execute: async ({ x, y, duration_ms }) => {
-          const [w, h] = await oriented();
-          showTouch(x, y, w, h, Math.max(220, duration_ms || 0));
-          await call("api/tap", { x, y, duration_ms });
-          return { tapped: [x, y] };
-        },
-      },
-      {
-        name: "swipe",
-        title: "Swipe",
-        description: `Drag from one point to another, for example to scroll. To scroll down a list, swipe from a low point to a higher one. ${COORDS}`,
-        inputSchema: {
-          type: "object",
-          properties: { x1: point("Start X."), y1: point("Start Y."), x2: point("End X."), y2: point("End Y."), duration_ms: { type: "integer", minimum: 50, maximum: 5000, default: 300 } },
-          required: ["x1", "y1", "x2", "y2"],
-        },
-        execute: async ({ x1, y1, x2, y2, duration_ms }) => {
-          const [w, h] = await oriented();
-          showTouch(x2, y2, w, h, duration_ms || 300);
-          await call("api/swipe", { x1, y1, x2, y2, duration_ms });
-          return { swiped: [[x1, y1], [x2, y2]] };
-        },
-      },
-      {
-        name: "type_text",
-        title: "Type text",
-        description: "Type text into the focused field. Tap the field first. Use press_key with Enter to submit.",
-        inputSchema: { type: "object", properties: { text: { type: "string", minLength: 1 } }, required: ["text"] },
-        execute: async ({ text }) => { await call("api/text", { text }); return { typed: text.length }; },
-      },
-      {
-        name: "press_key",
-        title: "Press a key",
-        description: "Press a hardware or keyboard key: GoBack (back), GoHome (home), AppSwitch (recent apps), Enter, Backspace, arrows, volume or Power.",
-        inputSchema: { type: "object", properties: { key: { type: "string", enum: KEYS } }, required: ["key"] },
-        execute: async ({ key }) => { await call("api/key", { key }); return { pressed: key }; },
-      },
-      {
-        name: "rotate",
-        title: "Rotate the device",
-        description: "Rotate the device 90 degrees clockwise. Screen coordinates change after rotation.",
-        inputSchema: { type: "object", properties: {} },
-        execute: async () => { await call("api/rotate", {}); return { rotated: true }; },
-      },
-      {
-        name: "open_url",
-        title: "Open a URL",
-        description: "Open a URL on the device, in the browser or the app that handles it. A URL without a scheme gets https://.",
-        inputSchema: { type: "object", properties: { url: { type: "string", minLength: 1 } }, required: ["url"] },
-        execute: ({ url }) => call("api/open-url", { url }),
-      },
-      {
-        name: "set_clipboard",
-        title: "Set the device clipboard",
-        description: "Replace the device clipboard text.",
-        inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-        execute: async ({ text }) => { await call("api/clipboard", { text }); return { clipboard: text }; },
-      },
-      {
-        name: "set_appearance",
-        title: "Set light or dark mode",
-        description: "Switch the device between light and dark mode.",
-        inputSchema: { type: "object", properties: { dark: { type: "boolean" } }, required: ["dark"] },
-        execute: async ({ dark }) => { await call("api/appearance", { dark }); return { dark }; },
-      },
-      {
-        name: "set_battery",
-        title: "Set the battery",
-        description: "Simulate a battery level and charger state.",
-        inputSchema: { type: "object", properties: { level: { type: "integer", minimum: 0, maximum: 100 }, charging: { type: "boolean" } }, required: ["level", "charging"] },
-        execute: async ({ level, charging }) => { await call("api/battery", { level, charging }); return { level, charging }; },
-      },
-      {
-        name: "set_location",
-        title: "Set the GPS location",
-        description: "Simulate a GPS position.",
-        inputSchema: { type: "object", properties: { lat: { type: "number", minimum: -90, maximum: 90 }, lng: { type: "number", minimum: -180, maximum: 180 } }, required: ["lat", "lng"] },
-        execute: async ({ lat, lng }) => { await call("api/location", { lat, lng }); return { lat, lng }; },
-      },
-      {
-        name: "read_logcat",
-        title: "Read device logs",
-        description: "Read recent logcat lines, oldest first. Filter by minimum level, by text in the tag or message, or by app package.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            lines: { type: "integer", minimum: 1, maximum: 2000, default: 200 },
-            level: { type: "string", enum: ["V", "D", "I", "W", "E", "F"], default: "V", description: "Minimum level." },
-            text: { type: "string" },
-            package: { type: "string", description: "Only lines from this app's running processes." },
+    async function register() {
+      const r = await fetch("tools.json");
+      if (!r.ok) throw new Error(`tools.json: HTTP ${r.status}`);
+      const manifest = await r.json();
+      const results = await Promise.allSettled(manifest.map(async (t) => {
+        const annotations = { ...t.annotations };
+        if (annotations.readOnlyHint || t.name === "run_shell") annotations.untrustedContentHint = true;
+        const extra = extras[t.name];
+        await mc.registerTool({
+          name: t.name,
+          title: t.title,
+          description: t.description,
+          inputSchema: t.inputSchema || { type: "object", properties: {} },
+          annotations,
+          execute: (input = {}) => {
+            const run = () => call(t.http, input);
+            return extra ? extra(input, run) : run();
           },
-        },
-        annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: ({ lines, level, text, package: pkg } = {}) => call("api/logcat", undefined, { lines, level, text, package: pkg }),
-      },
-    ];
+        });
+      }));
+      results.forEach((res, i) => res.status === "rejected" && console.warn(`WebMCP: ${manifest[i].name} not registered`, res.reason));
+    }
 
-    const done = Promise.allSettled(tools.map(async (tool) => mc.registerTool(tool)))
-      .then((results) => results.forEach((r, i) => r.status === "rejected" && console.warn(`WebMCP: ${tools[i].name} not registered`, r.reason)));
+    const done = register().catch((err) => console.warn("WebMCP: no tools", err));
     mc.waitForToolsUntil?.(done);
   })();
 </script>

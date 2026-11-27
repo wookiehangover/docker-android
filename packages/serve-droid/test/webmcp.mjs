@@ -1,4 +1,4 @@
-// E2E check of the browser UI's WebMCP tools against a running emulator.
+// E2E check of the browser UI's WebMCP tools against a running emulator. The page builds its tools from tools.json.
 // Usage: node test/webmcp.mjs http://127.0.0.1:6090/   (ARTIFACT_DIR picks the output directory)
 // A stand-in document.modelContext records registrations and runs tools the way the WebMCP draft does:
 // execute(input, { signal }), result serialized with JSON.stringify.
@@ -66,9 +66,15 @@ try {
 
   const tools = await page.evaluate(() => window.__webmcp.list());
   writeFileSync(join(artifact, "tools.json"), JSON.stringify(tools, null, 2));
-  assert.deepEqual(tools.map((t) => t.name).sort(), ["get_device_info", "get_screen", "get_ui_tree", "open_url", "press_key",
-    "read_logcat", "rotate", "set_appearance", "set_battery", "set_clipboard", "set_location", "swipe", "tap", "type_text"]);
-  for (const t of tools) assert.equal(t.inputSchema?.type, "object", t.name);
+  const manifest = await page.evaluate(() => fetch("tools.json").then((r) => r.json()));
+  assert.deepEqual(tools.map((t) => t.name).sort(), manifest.map((t) => t.name).sort(), "every manifest tool is registered");
+  for (const name of ["get_device_info", "get_ui_tree", "get_screen", "find_elements", "tap", "wait_for", "swipe", "scroll", "pinch",
+    "type_text", "press_key", "rotate", "read_logcat", "get_events"]) assert.ok(tools.some((t) => t.name === name), name);
+  for (const t of tools) {
+    assert.equal(t.inputSchema?.type, "object", t.name);
+    assert.ok(t.description, t.name);
+    if (t.annotations?.readOnlyHint) assert.equal(t.annotations.untrustedContentHint, true, t.name);
+  }
 
   let info = await must("get_device_info");
   for (let i = 0; i < 3 && info.screenWidth > info.screenHeight; i++) {
@@ -87,19 +93,27 @@ try {
   assert.equal(tree.screenWidth, w);
   let settings = findNode(tree, /^Settings$/);
   for (let i = 0; !settings && i < 4; i++) {
-    await must("swipe", { x1: w / 2, y1: h * 0.75, x2: w / 2, y2: h * 0.35 });
+    await must("scroll", { x: w / 2, y: h / 2, dx: 0, dy: h * 0.4 });
     await sleep(800);
     tree = await must("get_ui_tree");
     settings = findNode(tree, /^Settings$/);
   }
   assert.ok(settings, "Settings icon in the app drawer");
-  await must("tap", { x: settings.center[0], y: settings.center[1] });
+  const found = await must("find_elements", { text: "Settings", exact: true });
+  assert.ok(found.total >= 1 && found.matches[0].center, "find_elements finds Settings");
+  const tapped = await must("tap", { text: "Settings", exact: true });
+  assert.ok(typeof tapped.x === "number" && typeof tapped.y === "number", "tap by text returns the point");
+  const waited = await must("wait_for", { text: "Network", timeout_ms: 10000 });
+  assert.equal(waited.found, true, "wait_for sees the Settings screen");
   let fg;
   for (let i = 0; i < 10 && fg !== "com.android.settings"; i++) {
-    await sleep(700);
-    fg = (await must("get_device_info")).foregroundPackage;
+    fg = (await must("get_device_info")).foreground;
+    if (fg !== "com.android.settings") await sleep(700);
   }
   assert.equal(fg, "com.android.settings", "tap opened Settings");
+  const missing = await must("wait_for", { text: `no-such-text-${Date.now()}`, timeout_ms: 1000 });
+  assert.equal(missing.found, false, "wait_for times out with found:false");
+  await must("pinch", { x: w / 2, y: h / 2, scale: 0.8 });
   await page.screenshot({ path: join(artifact, "page-settings.png") });
 
   const shot = await must("get_screen", { max_edge: 640 });
@@ -119,6 +133,10 @@ try {
   await must("set_appearance", { dark: true });
   assert.equal((await must("get_device_info")).dark, true);
   await must("set_appearance", { dark: false });
+
+  const { events } = await must("get_events", { limit: 50 });
+  assert.ok(events.some((e) => e.source === "api" && e.action === "tap" && e.ok), "tap is in the event log");
+  assert.ok(events.some((e) => e.action === "clipboard"), "clipboard is in the event log");
 
   const off = await run("tap", { x: w + 10, y: 10 });
   assert.ok(off.failed && /outside/.test(off.message), "tap outside the screen is rejected");
@@ -145,7 +163,7 @@ try {
   fg = null;
   for (let i = 0; i < 10 && fg !== "com.google.android.dialer"; i++) {
     await sleep(700);
-    fg = (await must("get_device_info")).foregroundPackage;
+    fg = (await must("get_device_info")).foreground;
   }
   assert.equal(fg, "com.google.android.dialer", "rotated tap on Phone opened the dialer");
   await page.screenshot({ path: join(artifact, "page-rotated.png") });
