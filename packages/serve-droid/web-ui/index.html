@@ -344,7 +344,7 @@
   .wide.set { width: auto; flex: none; padding: 0 14px; }
   .wide:disabled { opacity: 0.5; cursor: default; }
   .stack { display: flex; flex-direction: column; gap: 8px; }
-  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .sub { margin: 10px 0 6px; color: var(--muted); }
   .list { list-style: none; margin: 0 -8px; padding: 0; max-height: 252px; overflow-y: auto; overscroll-behavior: contain; }
   .list li { display: flex; align-items: center; gap: 2px; min-height: 36px; padding: 0 2px 0 8px; border-radius: 8px; }
@@ -536,7 +536,7 @@
         <input id="sms-text" type="text" placeholder="SMS message" aria-label="SMS message" autocomplete="off">
         <button class="go" aria-label="Send SMS" title="Send SMS"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button>
       </form>
-      <div class="pair">
+      <div class="duo">
         <button class="wide" id="call">Call</button>
         <button class="wide" id="hangup">End call</button>
       </div>
