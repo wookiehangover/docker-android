@@ -84,12 +84,20 @@ async def adb_shell_status(command: str, timeout: float = 30):
     """Run a shell command and return its combined output and exit code instead of raising on failure."""
     proc = await asyncio.create_subprocess_exec(
         "adb", "shell", command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    async def read_capped() -> bytes:
+        # Keep draining past the cap so the command never blocks on a full pipe.
+        kept = bytearray()
+        while chunk := await proc.stdout.read(65536):
+            if len(kept) < MAX_SHELL_OUTPUT:
+                kept += chunk[:MAX_SHELL_OUTPUT - len(kept)]
+        return bytes(kept)
+
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        out, _ = await asyncio.wait_for(asyncio.gather(read_capped(), proc.wait()), timeout)
     except asyncio.TimeoutError:
         proc.kill()
         raise RuntimeError(f"shell command timed out after {timeout:g} s")
-    return out[:MAX_SHELL_OUTPUT].decode(errors="replace"), proc.returncode
+    return out.decode(errors="replace"), proc.returncode
 
 
 class EventLog:
@@ -871,8 +879,26 @@ async def get_events_script(emu: Emulator, body: dict, request: web.Request):
     w, h = emu.display_size()
     device = {"label": emu.label, "model": emu.details.get("model"), "android": emu.details.get("android"),
               "screenWidth": w, "screenHeight": h}
-    return {"version": 1, "device": device,
-            "steps": [script_step(e["time"] - t0, e["action"], e["params"]) for e in events]}
+    steps, skipped = [], []
+    for e in events:
+        reason = not_replayable(e["action"], e["params"])
+        if reason:
+            skipped.append({"t": e["time"] - t0, "action": e["action"], "reason": reason})
+        else:
+            steps.append(script_step(e["time"] - t0, e["action"], e["params"]))
+    script = {"version": 1, "device": device, "steps": steps}
+    if skipped:
+        script["skipped"] = skipped
+    return script
+
+
+def not_replayable(action: str, params: dict):
+    """The log keeps no APK bytes and only the start of long clipboard text, so those steps cannot replay."""
+    if action == "install":
+        return "the APK file is not recorded; install it again before replaying"
+    if params.get("truncated"):
+        return "the text was too long to record in full"
+    return None
 
 
 def script_step(t: int, action: str, params: dict) -> dict:

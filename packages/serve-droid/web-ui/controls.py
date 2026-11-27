@@ -60,7 +60,7 @@ async def console(*args: str, timeout: float = 30) -> str:
 def state(emu) -> dict:
     """Per-emulator state that the console cannot read back (network profile, GPS route task)."""
     if not hasattr(emu, "_controls"):
-        emu._controls = {"speed": "full", "delay": "none", "route": None}
+        emu._controls = {"speed": "full", "delay": "none", "route": None, "route_lock": asyncio.Lock()}
     return emu._controls
 
 
@@ -314,6 +314,12 @@ def stop_route(emu) -> bool:
 
 
 async def post_location(emu, body: dict, request):
+    # One request at a time, so a route that is starting cannot escape a later stop or replacement.
+    async with state(emu)["route_lock"]:
+        return await set_location(emu, body)
+
+
+async def set_location(emu, body: dict):
     if body.get("stop"):
         return {"stopped": stop_route(emu)}
     if "route" in body:

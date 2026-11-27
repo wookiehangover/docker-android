@@ -14,7 +14,6 @@ const installApk = {
     required: ['path'],
   },
   annotations: { destructiveHint: false },
-  local: true,
 };
 
 // Older servers (before tools.json) still have these endpoints.
@@ -74,7 +73,7 @@ export function runMcp({ resolve, version, input = process.stdin, output = proce
     const tool = (await manifest()).find(entry => entry.name === name);
     if (!tool) throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
     const api = await client();
-    if (tool.local) {
+    if (tool === installApk) {
       if (typeof args.path !== 'string' || !args.path) throw new ServeDroidError('path is required');
       const result = await api.install(await readFile(args.path));
       return [{ type: 'text', text: JSON.stringify(result) }];

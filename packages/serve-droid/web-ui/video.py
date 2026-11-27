@@ -266,7 +266,8 @@ class VideoCapture:
             parser, last_restart, pid = AnnexB(), self.last_restart, None
             try:
                 pid = int(await asyncio.wait_for(self.proc.stdout.readline(), 10))
-                while True:
+                # The last viewer can leave while adb starts; unsubscribe() had no process to kill then.
+                while self.viewers:
                     try:
                         chunk = await asyncio.wait_for(self.proc.stdout.read(1 << 16), SETTLE if parser.pending else 1)
                     except asyncio.TimeoutError:

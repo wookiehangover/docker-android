@@ -16,15 +16,19 @@ function tokenMatches(expected, given) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function cookies(header = '') {
-  return Object.fromEntries(header.split(/;\s*/).filter(Boolean).map(pair => {
-    const at = pair.indexOf('=');
-    return at < 0 ? [pair, ''] : [pair.slice(0, at), decodeURIComponent(pair.slice(at + 1))];
-  }));
+function hubCookie(header = '') {
+  const pair = header.split(/;\s*/).find(entry => entry.startsWith(`${cookieName}=`));
+  if (!pair) return undefined;
+  try {
+    return decodeURIComponent(pair.slice(cookieName.length + 1));
+  } catch {
+    return undefined;
+  }
 }
 
-// The hub's own cookie stays at the hub; the emulators never see it.
-function dropHubCookie(req) {
+// The hub's own credentials stay at the hub; the emulators never see them.
+function dropHubCredentials(req) {
+  delete req.headers.authorization;
   if (!req.headers.cookie) return;
   const rest = req.headers.cookie.split(/;\s*/).filter(pair => !pair.startsWith(`${cookieName}=`));
   if (rest.length) req.headers.cookie = rest.join('; ');
@@ -71,7 +75,7 @@ export function createHub({ token, sessions = listSessions, cacheMs = 2000 } = {
     if (!token) return true;
     const header = req.headers.authorization ?? '';
     return tokenMatches(token, header.startsWith('Bearer ') ? header.slice(7) : '')
-      || tokenMatches(token, cookies(req.headers.cookie)[cookieName]);
+      || tokenMatches(token, hubCookie(req.headers.cookie));
   }
 
   function send(res, status, type, body, headers = {}) {
@@ -107,7 +111,7 @@ export function createHub({ token, sessions = listSessions, cacheMs = 2000 } = {
     if (name) {
       const proxy = proxyFor(name);
       if (!proxy) return send(res, 404, 'text/plain', `No running emulator named ${name}. Run serve-droid ls.`);
-      dropHubCookie(req);
+      dropHubCredentials(req);
       return proxy(req, res, () => send(res, 404, 'text/plain', 'Not found.'));
     }
     return send(res, 404, 'text/plain', 'Not found.');
@@ -120,7 +124,7 @@ export function createHub({ token, sessions = listSessions, cacheMs = 2000 } = {
     const name = emulatorName(req.url);
     const proxy = name ? proxyFor(name) : undefined;
     if (proxy) {
-      dropHubCookie(req);
+      dropHubCredentials(req);
       if (proxy.handleUpgrade(req, socket, head)) return;
     }
     socket.end('HTTP/1.1 404 Not Found\r\nconnection: close\r\ncontent-length: 0\r\n\r\n');
