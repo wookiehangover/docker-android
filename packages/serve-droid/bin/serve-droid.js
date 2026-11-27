@@ -14,8 +14,9 @@ import { containerToken, containerUrl, listSessions, native, owner, projectName,
 import { actionHelp, actionOptions, actionVerbs, runAction } from '../lib/actions.js';
 import { runMcp } from '../lib/mcp.js';
 import { hubToken, startHub } from '../lib/hub.js';
+import { formatDoctor, runDoctor } from '../lib/doctor.js';
 
-const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach|mcp|hub|ACTION] [options]
+const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach|mcp|hub|doctor|ACTION] [options]
 
 Start or reuse the project's Android emulator and print its browser URL.
 Stop shuts the emulator down and keeps its Android data for the next start.
@@ -29,6 +30,7 @@ Stop shuts the emulator down and keeps its Android data for the next start.
   mcp               Serve MCP over stdio for agents (--name, --url, --start boots the emulator first)
   hub               One page for every running emulator, each proxied under /d/NAME/ on one port
                     (--host, --port default 6089, --token)
+  doctor            Check this machine's setup and show how to fix each problem (--json)
   --serial SERIAL   Native emulator to use on macOS and Windows (example: emulator-5554)
   --name NAME       Select a named emulator (default: current project)
   --device PROFILE  Device profile (default: Samsung Galaxy S10)
@@ -155,7 +157,7 @@ const lifecycleOptions = {
   serial: { type: 'string' }, follow: { type: 'boolean', short: 'f' }, yes: { type: 'boolean', short: 'y' },
   name: { type: 'string' }, device: { type: 'string' }, android: { type: 'string' },
   host: { type: 'string' }, port: { type: 'string' }, apk: { type: 'string' }, image: { type: 'string' },
-  token: { type: 'boolean' },
+  token: { type: 'boolean' }, json: { type: 'boolean' },
 };
 
 function checkName(name) {
@@ -188,7 +190,12 @@ function parseCommand() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: lifecycleOptions });
   if (values.help) return { command: 'help' };
   const [command = 'start'] = positionals;
-  if (positionals.length > 1 || !['start', 'stop', 'ls', 'logs', 'rm', 'attach', 'hub'].includes(command)) throw new Error(help);
+  if (positionals.length > 1 || !['start', 'stop', 'ls', 'logs', 'rm', 'attach', 'hub', 'doctor'].includes(command)) throw new Error(help);
+  if (command === 'doctor') {
+    if (Object.keys(values).some(key => key !== 'json')) throw new Error('doctor accepts only --json.');
+    return { command, values };
+  }
+  if (values.json) throw new Error(`--json does not apply to ${command}.`);
   if (command === 'ls') {
     if (Object.keys(values).length) throw new Error('ls takes no options.');
     return { command };
@@ -396,6 +403,12 @@ async function main() {
   const { command, name, values, args } = parseCommand();
   if (command === 'help') return console.log(help);
   if (command === 'ls') return printSessions();
+  if (command === 'doctor') {
+    const report = runDoctor();
+    console.log(values.json ? JSON.stringify(report, null, 2) : formatDoctor(report));
+    if (!report.ok) process.exitCode = 1;
+    return;
+  }
   if (command === 'mcp') {
     // stdout is the JSON-RPC channel: everything else goes to stderr.
     console.log = console.error;

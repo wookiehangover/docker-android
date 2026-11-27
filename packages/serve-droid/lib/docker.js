@@ -46,10 +46,17 @@ export const apiLevels = new Map(Object.entries({
   '14.0': '34', '15.0': '35', '16.0': '36', '17.0': '37.0',
 }));
 
-export function emulatorImage(android) {
+// The local build tag first, then the published image with the same tag.
+export function imageTags(android) {
   const suffix = android === '17.0' ? '-tools22' : '';
   const tag = `docker-android:emulator_${android}-webui${suffix}`;
-  for (const image of [tag, `wookiehangover/${tag}`]) {
+  return [tag, `wookiehangover/${tag}`];
+}
+
+export function emulatorImage(android) {
+  const tags = imageTags(android);
+  const [tag] = tags;
+  for (const image of tags) {
     if (docker('image', 'ls', '-q', image)) return image;
   }
 

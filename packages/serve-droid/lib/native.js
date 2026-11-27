@@ -61,13 +61,25 @@ function installUv(bin) {
   }
 }
 
+// Where start keeps the browser UI's Python environment for the current folder.
+export function pythonPaths(cwd = process.cwd()) {
+  const state = join(cwd, '.serve-droid');
+  const venv = realpathSync(cwd) === realpathSync(packageDir) ? join(cwd, '.venv') : join(state, '.venv');
+  return {
+    state, venv,
+    python: windows ? join(venv, 'Scripts', 'python.exe') : join(venv, 'bin', 'python'),
+    localUv: join(state, 'bin', windows ? 'uv.exe' : 'uv'),
+  };
+}
+
+export const pythonCandidates = windows
+  ? [['py', '-3.14'], ['py', '-3.13'], ['py', '-3.12'], ['python']]
+  : [['python3'], ['python3.14'], ['python3.13'], ['python3.12']];
+
 // Create or update the browser UI's Python environment and return its interpreter.
 async function pythonEnvironment() {
-  const state = join(process.cwd(), '.serve-droid');
-  const venv = realpathSync(process.cwd()) === realpathSync(packageDir) ? join(process.cwd(), '.venv') : join(state, '.venv');
-  const python = windows ? join(venv, 'Scripts', 'python.exe') : join(venv, 'bin', 'python');
+  const { state, venv, python, localUv } = pythonPaths();
   const marker = join(venv, '.serve-droid-system');
-  const localUv = join(state, 'bin', windows ? 'uv.exe' : 'uv');
   let uv = succeeds('uv', ['--version']) ? 'uv' : existsSync(localUv) ? localUv : null;
 
   let mode = process.env.SERVE_DROID_PYTHON_SETUP;
@@ -78,9 +90,7 @@ async function pythonEnvironment() {
     else mode = 'system';
   }
   if (mode === 'system') {
-    const candidates = [[python], ...(windows
-      ? [['py', '-3.14'], ['py', '-3.13'], ['py', '-3.12'], ['python']]
-      : [['python3'], ['python3.14'], ['python3.13'], ['python3.12']])];
+    const candidates = [[python], ...pythonCandidates];
     const system = candidates.find(supportedPython);
     if (!system) {
       throw new Error('System setup needs Python 3.12–3.14. To install uv instead, rerun with SERVE_DROID_PYTHON_SETUP=uv.');
