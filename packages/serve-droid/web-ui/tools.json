@@ -404,7 +404,7 @@
   {
     "name": "rotate",
     "title": "Rotate the device",
-    "description": "Rotate the device 90 degrees clockwise. Screen coordinates change after rotation.",
+    "description": "Toggle the device between portrait and landscape. Screen coordinates change after rotation.",
     "inputSchema": {
       "type": "object",
       "properties": {}

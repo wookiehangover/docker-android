@@ -399,7 +399,8 @@ class Emulator:
         await self.send("sendKey", pb.KeyboardEvent(text=text), strict)
 
     async def rotate(self, strict: bool = False) -> None:
-        angle = {0: 90, 1: 180, 2: 270, 3: 0}[self.rotation]
+        # Toggle portrait and landscape only: the Android images ignore 180°, which leaves the device and frames out of step.
+        angle = 0 if self.rotation % 2 else 90
         await self.send("setPhysicalModel", pb.PhysicalModelValue(
             target=pb.PhysicalModelValue.ROTATION, value=pb.ParameterValue(data=[0, 0, angle])), strict)
 
