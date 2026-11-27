@@ -181,7 +181,11 @@
     gap: 16px;
   }
   .panel[hidden] { display: flex; visibility: hidden; }
-  .panel-tabs { flex: none; margin-right: 44px; }
+  .panel-tabs { flex: none; margin-right: 44px; position: sticky; top: 0; z-index: 1; }
+  .panel-tabs { border-color: transparent; background: none; }
+  .panel-tabs::before, .panel-tabs::after { content: ""; position: absolute; z-index: -1; }
+  .panel-tabs::before { inset: -40px -65px -9px -21px; background: #101010; }
+  .panel-tabs::after { inset: -1px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
   .tab { display: flex; flex-direction: column; gap: 24px; }
   .tab[hidden] { display: none; }
   .log-open { --panel: min(620px, 46vw); }
