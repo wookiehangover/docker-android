@@ -1,0 +1,924 @@
+[
+  {
+    "name": "get_device_info",
+    "title": "Get device info",
+    "description": "Device model, Android version, screen size and density, the foreground app, and battery, location, dark mode and clipboard state.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "http": {
+      "method": "GET",
+      "path": "api/device-info"
+    },
+    "result": "json",
+    "annotations": {
+      "readOnlyHint": true
+    }
+  },
+  {
+    "name": "get_ui_tree",
+    "title": "Read the screen layout",
+    "description": "List the visible UI elements: class, text, content description, resource id, flags (clickable, editable, scrollable, checked…), and bounds and center in screen pixels. Prefer this or find_elements over get_screen to find what to tap.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "http": {
+      "method": "GET",
+      "path": "api/ui-tree"
+    },
+    "result": "json",
+    "annotations": {
+      "readOnlyHint": true
+    }
+  },
+  {
+    "name": "get_screen",
+    "title": "Capture the screen",
+    "description": "Capture the current screen as a JPEG image. The image can be smaller than the screen: scale points by screenWidth / width before tapping.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "max_edge": {
+          "type": "integer",
+          "minimum": 160,
+          "maximum": 1280,
+          "default": 768,
+          "description": "Longest image edge in pixels."
+        }
+      }
+    },
+    "http": {
+      "method": "GET",
+      "path": "api/frame"
+    },
+    "result": "image",
+    "annotations": {
+      "readOnlyHint": true
+    }
+  },
+  {
+    "name": "find_elements",
+    "title": "Find UI elements",
+    "description": "Find visible UI elements by text, resource id, content description or class. Returns the matching nodes with bounds and center in screen pixels. Give at least one of text, id, desc or class.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Text or content description contains this (case-insensitive)."
+        },
+        "id": {
+          "type": "string",
+          "description": "Resource id, full (com.app:id/name) or just the name."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Content description contains this."
+        },
+        "class": {
+          "type": "string",
+          "description": "Widget class, e.g. Button or EditText."
+        },
+        "exact": {
+          "type": "boolean",
+          "default": false,
+          "description": "Match whole values, case-sensitive."
+        }
+      }
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/find"
+    },
+    "result": "json",
+    "annotations": {
+      "readOnlyHint": true
+    }
+  },
+  {
+    "name": "tap",
+    "title": "Tap",
+    "description": "Tap an element found by text, id, desc or class, or a point given as x and y. Set duration_ms to 600 or more for a long press (context menus, drag handles). Fails with 404 when no element matches. Coordinates are screen pixels in the current orientation, as returned by get_ui_tree and get_screen.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "description": "X in pixels. Use with y instead of a selector."
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Y in pixels."
+        },
+        "text": {
+          "type": "string",
+          "description": "Text or content description contains this (case-insensitive)."
+        },
+        "id": {
+          "type": "string",
+          "description": "Resource id, full (com.app:id/name) or just the name."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Content description contains this."
+        },
+        "class": {
+          "type": "string",
+          "description": "Widget class, e.g. Button or EditText."
+        },
+        "exact": {
+          "type": "boolean",
+          "default": false,
+          "description": "Match whole values, case-sensitive."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Pick the nth match, from 0."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 40,
+          "maximum": 5000,
+          "default": 60,
+          "description": "How long to hold. 600 or more is a long press."
+        }
+      }
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/tap"
+    },
+    "result": "json"
+  },
+  {
+    "name": "wait_for",
+    "title": "Wait for an element",
+    "description": "Wait until an element matching the selector appears, or disappears with gone=true. Returns found:true when that happens and found:false on timeout (not an error). Each check reads the UI tree, which takes about a second.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Text or content description contains this (case-insensitive)."
+        },
+        "id": {
+          "type": "string",
+          "description": "Resource id, full (com.app:id/name) or just the name."
+        },
+        "desc": {
+          "type": "string",
+          "description": "Content description contains this."
+        },
+        "class": {
+          "type": "string",
+          "description": "Widget class, e.g. Button or EditText."
+        },
+        "exact": {
+          "type": "boolean",
+          "default": false,
+          "description": "Match whole values, case-sensitive."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Pick the nth match, from 0."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 10000
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 10000,
+          "default": 500,
+          "description": "Pause between checks."
+        },
+        "gone": {
+          "type": "boolean",
+          "default": false,
+          "description": "Wait for the element to disappear instead."
+        }
+      }
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/wait"
+    },
+    "result": "json",
+    "annotations": {
+      "readOnlyHint": true
+    }
+  },
+  {
+    "name": "swipe",
+    "title": "Swipe",
+    "description": "Drag from one point to another with one finger, for example to dismiss or drag. To scroll a list by an exact distance, use scroll. Coordinates are screen pixels in the current orientation, as returned by get_ui_tree and get_screen.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "x1": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Start X."
+        },
+        "y1": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Start Y."
+        },
+        "x2": {
+          "type": "number",
+          "minimum": 0,
+          "description": "End X."
+        },
+        "y2": {
+          "type": "number",
+          "minimum": 0,
+          "description": "End Y."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 5000,
+          "default": 300
+        }
+      },
+      "required": [
+        "x1",
+        "y1",
+        "x2",
+        "y2"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/swipe"
+    },
+    "result": "json"
+  },
+  {
+    "name": "scroll",
+    "title": "Scroll",
+    "description": "Scroll the content under a point like a mouse wheel, without a fling: positive dy reveals content further down, positive dx content further right. x and y default to the screen center. Coordinates are screen pixels in the current orientation, as returned by get_ui_tree and get_screen.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "description": "X of the scrollable area."
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Y of the scrollable area."
+        },
+        "dx": {
+          "type": "number",
+          "default": 0,
+          "description": "Horizontal pixels."
+        },
+        "dy": {
+          "type": "number",
+          "default": 0,
+          "description": "Vertical pixels. Positive scrolls down."
+        }
+      }
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/scroll"
+    },
+    "result": "json"
+  },
+  {
+    "name": "pinch",
+    "title": "Pinch to zoom",
+    "description": "Two-finger pinch around a point, for maps, photos and web pages. scale above 1 zooms in, below 1 zooms out. x and y default to the screen center. Coordinates are screen pixels in the current orientation, as returned by get_ui_tree and get_screen.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Center X."
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Center Y."
+        },
+        "scale": {
+          "type": "number",
+          "minimum": 0.2,
+          "maximum": 5,
+          "description": "Finger distance at the end divided by the start."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 5000,
+          "default": 400
+        }
+      },
+      "required": [
+        "scale"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/pinch"
+    },
+    "result": "json"
+  },
+  {
+    "name": "type_text",
+    "title": "Type text",
+    "description": "Type text into the focused field. Tap the field first. Use press_key with Enter to submit.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/text"
+    },
+    "result": "json"
+  },
+  {
+    "name": "press_key",
+    "title": "Press a key",
+    "description": "Press a hardware or keyboard key: GoBack (back), GoHome (home), AppSwitch (recent apps), Enter, Backspace, arrows, volume or Power.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "GoBack",
+            "GoHome",
+            "AppSwitch",
+            "Enter",
+            "Backspace",
+            "Delete",
+            "Tab",
+            "Escape",
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "AudioVolumeUp",
+            "AudioVolumeDown",
+            "Power"
+          ]
+        }
+      },
+      "required": [
+        "key"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/key"
+    },
+    "result": "json"
+  },
+  {
+    "name": "rotate",
+    "title": "Rotate the device",
+    "description": "Rotate the device 90 degrees clockwise. Screen coordinates change after rotation.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/rotate"
+    },
+    "result": "json"
+  },
+  {
+    "name": "open_url",
+    "title": "Open a URL",
+    "description": "Open a URL or deep link on the device, in the browser or the app that handles it. A URL without a scheme gets https://.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/open-url"
+    },
+    "result": "json"
+  },
+  {
+    "name": "set_clipboard",
+    "title": "Set the device clipboard",
+    "description": "Replace the device clipboard text.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/clipboard"
+    },
+    "result": "json"
+  },
+  {
+    "name": "set_appearance",
+    "title": "Set light or dark mode",
+    "description": "Switch the device between light and dark mode.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "dark": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "dark"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/appearance"
+    },
+    "result": "json"
+  },
+  {
+    "name": "set_battery",
+    "title": "Set the battery",
+    "description": "Simulate a battery level and charger state.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "charging": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "level",
+        "charging"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/battery"
+    },
+    "result": "json"
+  },
+  {
+    "name": "set_location",
+    "title": "Set the GPS location",
+    "description": "Simulate a GPS position, play a route of points (one every interval_ms, optionally looping), or stop a running route with stop=true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lng": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "route": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "number"
+            }
+          },
+          "description": "Points as [lat, lng] pairs. Use instead of lat and lng."
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "default": 1000,
+          "description": "Time between route points."
+        },
+        "loop": {
+          "type": "boolean",
+          "default": false,
+          "description": "Restart the route at the end."
+        },
+        "stop": {
+          "type": "boolean",
+          "description": "Stop a running route."
+        }
+      }
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/location"
+    },
+    "result": "json"
+  },
+  {
+    "name": "read_logcat",
+    "title": "Read device logs",
+    "description": "Read recent logcat lines, oldest first. Filter by minimum level, by text in the tag or message, or by app package.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "lines": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000,
+          "default": 200
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "V",
+            "D",
+            "I",
+            "W",
+            "E",
+            "F"
+          ],
+          "default": "V",
+          "description": "Minimum level."
+        },
+        "text": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string",
+          "description": "Only lines from this app's running processes."
+        }
+      }
+    },
+    "http": {
+      "method": "GET",
+      "path": "api/logcat"
+    },
+    "result": "json",
+    "annotations": {
+      "readOnlyHint": true
+    }
+  },
+  {
+    "name": "list_apps",
+    "title": "List installed apps",
+    "description": "List installed package names: apps the user installed, or every package with all=true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include system packages."
+        }
+      }
+    },
+    "http": {
+      "method": "GET",
+      "path": "api/apps"
+    },
+    "result": "json",
+    "annotations": {
+      "readOnlyHint": true
+    }
+  },
+  {
+    "name": "manage_app",
+    "title": "Launch, stop, clear or uninstall an app",
+    "description": "Act on an installed app by package name: launch it, force-stop it, clear its data (a fresh start), or uninstall it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "launch",
+            "stop",
+            "clear",
+            "uninstall"
+          ]
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Package name, e.g. com.android.chrome."
+        }
+      },
+      "required": [
+        "action",
+        "package"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/app"
+    },
+    "result": "json",
+    "annotations": {
+      "destructiveHint": true
+    }
+  },
+  {
+    "name": "snapshot",
+    "title": "Save or restore an emulator snapshot",
+    "description": "Manage emulator snapshots to reset device state: list them, save the current state under a name, load one, or delete one.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "save",
+            "load",
+            "delete"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "Snapshot name. Needed for save, load and delete."
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/snapshots"
+    },
+    "result": "json",
+    "annotations": {
+      "destructiveHint": true
+    }
+  },
+  {
+    "name": "send_sms",
+    "title": "Receive an SMS",
+    "description": "Deliver an incoming text message to the device from a phone number.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "number",
+        "text"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/sms"
+    },
+    "result": "json"
+  },
+  {
+    "name": "phone_call",
+    "title": "Simulate a phone call",
+    "description": "Simulate a call from a number: call starts an incoming call; accept, end, hold and busy change it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "call",
+            "accept",
+            "end",
+            "hold",
+            "busy"
+          ],
+          "default": "call"
+        }
+      },
+      "required": [
+        "number"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/phone"
+    },
+    "result": "json"
+  },
+  {
+    "name": "touch_fingerprint",
+    "title": "Touch the fingerprint sensor",
+    "description": "Touch the fingerprint sensor with an enrolled finger id, for example to pass a biometric prompt.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Finger id. Enroll it first in Settings."
+        }
+      }
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/fingerprint"
+    },
+    "result": "json"
+  },
+  {
+    "name": "set_network",
+    "title": "Set network conditions",
+    "description": "Simulate network speed and latency, and turn airplane mode, Wi-Fi and mobile data on or off. Call with no arguments to read the current state.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "speed": {
+          "type": "string",
+          "enum": [
+            "gsm",
+            "edge",
+            "umts",
+            "lte",
+            "full"
+          ]
+        },
+        "delay": {
+          "type": "string",
+          "enum": [
+            "gprs",
+            "edge",
+            "umts",
+            "none"
+          ]
+        },
+        "airplane": {
+          "type": "boolean"
+        },
+        "wifi": {
+          "type": "boolean"
+        },
+        "data": {
+          "type": "boolean"
+        }
+      }
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/network"
+    },
+    "result": "json"
+  },
+  {
+    "name": "set_accessibility",
+    "title": "Set font, density, locale or TalkBack",
+    "description": "Change the font scale, screen density (\"reset\" restores it), locale (like fr-FR) or TalkBack. Call with no arguments to read the current values.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "font_scale": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 3
+        },
+        "density": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 72
+            },
+            {
+              "type": "string",
+              "enum": [
+                "reset"
+              ]
+            }
+          ]
+        },
+        "locale": {
+          "type": "string",
+          "description": "BCP 47 tag, e.g. en-US or ar-EG."
+        },
+        "talkback": {
+          "type": "boolean"
+        }
+      }
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/accessibility"
+    },
+    "result": "json"
+  },
+  {
+    "name": "get_events",
+    "title": "Read the action log",
+    "description": "Recent actions on the device, oldest first: API calls and gestures from people in the browser, with their parameters and results.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 200
+        },
+        "after": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Only events with a larger id."
+        }
+      }
+    },
+    "http": {
+      "method": "GET",
+      "path": "api/events"
+    },
+    "result": "json",
+    "annotations": {
+      "readOnlyHint": true
+    }
+  },
+  {
+    "name": "run_shell",
+    "title": "Run an adb shell command",
+    "description": "Run a command in adb shell on the device and return its combined output and exit code. Prefer the specific tools when one fits.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "http": {
+      "method": "POST",
+      "path": "api/shell"
+    },
+    "result": "json",
+    "annotations": {
+      "destructiveHint": true
+    }
+  }
+]
