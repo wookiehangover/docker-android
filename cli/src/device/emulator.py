@@ -181,7 +181,19 @@ class Emulator(Device):
 
         start_cmd = f"{basic_cmd} {basic_args} {wipe_arg} {self.additional_args}"
         self.logger.info(f"Command to run {self.device_type}: '{start_cmd}'")
-        subprocess.Popen(shlex.split(start_cmd))
+        subprocess.Popen(shlex.split(start_cmd), env=self._emulator_env())
+
+    # Lets QEMU reach the modem simulator at ::1 when Docker leaves eth0 without IPv6.
+    # Without it the radio never powers on (no SMS, no calls). See mixins/native/ipv6-loopback-fix.c.
+    IPV6_LOOPBACK_FIX = "/usr/local/lib/ipv6-loopback-fix.so"
+
+    def _emulator_env(self) -> dict:
+        env = os.environ.copy()
+        if os.path.isfile(self.IPV6_LOOPBACK_FIX):
+            preload = env.get("LD_PRELOAD", "")
+            env["LD_PRELOAD"] = f"{self.IPV6_LOOPBACK_FIX} {preload}".strip()
+            self.logger.info(f"Preloading {self.IPV6_LOOPBACK_FIX} for the modem link")
+        return env
 
     def start(self) -> None:
         super().start()

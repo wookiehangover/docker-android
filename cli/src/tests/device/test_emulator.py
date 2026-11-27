@@ -71,10 +71,23 @@ class TestEmulator(BaseDeviceTest):
                 mock.patch("subprocess.Popen") as popen:
             self.emu.deploy()
 
-        popen.assert_called_once_with([
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args[0][0], [
             "emulator", "@my_emu", "-gpu", "swiftshader_indirect", "-accel", "on",
             "-writable-system", "-verbose", "-turncfg", "cat /tmp/turn.cfg"
         ])
+
+    def test_emulator_env_preloads_ipv6_loopback_fix_when_present(self):
+        with mock.patch("os.path.isfile", return_value=True), \
+                mock.patch.dict(os.environ, {"LD_PRELOAD": "/other.so"}):
+            env = self.emu._emulator_env()
+        self.assertEqual(env["LD_PRELOAD"], f"{self.emu.IPV6_LOOPBACK_FIX} /other.so")
+
+    def test_emulator_env_unchanged_without_ipv6_loopback_fix(self):
+        with mock.patch("os.path.isfile", return_value=False), \
+                mock.patch.dict(os.environ, {}, clear=True):
+            env = self.emu._emulator_env()
+        self.assertNotIn("LD_PRELOAD", env)
 
     def test_deploy_headless_adds_no_window_once(self):
         for additional_args, expected_tail in (("", ["-no-window"]), ("-no-window", ["-no-window"])):
