@@ -41,6 +41,7 @@
     padding: 28px var(--gutter) max(28px, env(safe-area-inset-bottom));
     max-width: 1400px;
   }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; }
   .tile {
     display: flex;
     flex-direction: column;
@@ -120,6 +121,86 @@
     text-wrap: balance;
     overflow-wrap: anywhere;
   }
+  .urls { width: 100%; max-width: 240px; font: var(--mono); color: var(--muted); }
+  .urls summary {
+    width: max-content;
+    margin: 0 auto;
+    padding: 2px 8px;
+    border-radius: 6px;
+    list-style: none;
+    cursor: pointer;
+  }
+  .urls summary::-webkit-details-marker { display: none; }
+  .urls summary:hover, .urls[open] summary { color: var(--text); }
+  .urls summary:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .urls ul { margin: 8px 0 0; padding: 4px; list-style: none; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+  .urls button {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--text);
+    font: var(--mono);
+    text-align: left;
+    cursor: copy;
+  }
+  .urls button:hover, .urls button:focus-visible { background: var(--surface-hover); outline: none; }
+  .urls button span:first-child { color: var(--muted); }
+  .urls button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .urls button.copied span:last-child { color: var(--live); }
+  .add .device {
+    display: grid;
+    background: none;
+    box-shadow: none;
+    border: 1px dashed #3a3a3a;
+  }
+  .add .screen { display: grid; place-items: center; background: none; aspect-ratio: 0.4737; color: var(--muted); font-size: 40px; font-weight: 200; }
+  .add:hover .device, .add:focus-visible .device { border-color: #5a5a5a; box-shadow: none; }
+  .add:hover .screen { color: var(--text); }
+  button.tile { width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+  form.new {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    max-width: 240px;
+    padding: 14px;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  form.new label { display: flex; flex-direction: column; gap: 4px; font: var(--mono); color: var(--muted); }
+  form.new input, form.new select {
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--text);
+    font: 14px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  form.new input:focus-visible, form.new select:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+  form.new .actions { display: flex; gap: 8px; margin-top: 4px; }
+  form.new button {
+    flex: 1;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--surface-hover);
+    color: var(--text);
+    font: 14px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    cursor: pointer;
+  }
+  form.new button[type=submit] { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; }
+  form.new .error { margin: 0; font: var(--mono); color: var(--danger); }
+  .pending .device { opacity: 0.85; }
+  .pending .note { font-size: 12px; }
+  .dismiss { border: 0; background: none; color: var(--muted); font: var(--mono); cursor: pointer; padding: 2px 8px; border-radius: 6px; }
+  .dismiss:hover { color: var(--text); }
   .empty {
     grid-column: 1 / -1;
     padding: 80px 0;
@@ -154,6 +235,7 @@
   "use strict";
   const grid = document.getElementById("grid");
   const tiles = new Map();
+  let choices = {}, adding = null;
   const FRAME_MS = 1000;
   const LIST_MS = 5000;
 
@@ -204,6 +286,93 @@
     return (device || "").replace(/^Samsung\s+/, "").replace(/,\s*(Android)/, " · $1");
   }
 
+  const URL_ROWS = [["Stream", "stream"], ["Video", "video"], ["AVCC", "avcc"], ["WS", "ws"], ["Input", "input"]];
+
+  // "…/d/NAME/stream.mjpeg?token=…" → "stream.mjpeg"; "…/ws?token=…&video=none" → "ws?video=none".
+  function shortUrl(href) {
+    const url = new URL(href);
+    url.searchParams.delete("token");
+    return url.pathname.split("/").pop() + url.search;
+  }
+
+  // Click a row to copy its URL. The token, if any, is part of it.
+  function urlList(urls) {
+    const list = el("ul");
+    for (const [label, key] of URL_ROWS) {
+      if (!urls[key]) continue;
+      const button = el("button", { type: "button", title: `Copy ${urls[key]}` }, el("span", { textContent: label }), el("span", { textContent: shortUrl(urls[key]) }));
+      button.addEventListener("click", async () => {
+        await navigator.clipboard?.writeText(urls[key]).catch(() => {});
+        button.classList.add("copied");
+        setTimeout(() => button.classList.remove("copied"), 1200);
+      });
+      list.append(el("li", {}, button));
+    }
+    return el("details", { className: "urls" }, el("summary", { textContent: "URLs" }), list);
+  }
+
+  function pendingTile(session) {
+    const failed = session.state === "failed";
+    const note = el("div", { className: "note", textContent: session.progress || "Starting…" });
+    const state = el("span", { className: `state ${failed ? "off" : ""}`, textContent: failed ? "failed" : "starting" });
+    const parts = [el("div", { className: "tile pending" },
+      el("div", { className: "device" }, el("div", { className: "screen" }, note)),
+      el("div", { className: "badge" }, el("span", { className: "name", textContent: session.name }), state))];
+    if (session.device) parts.push(el("div", { className: "meta", textContent: shortDevice(session.device) }));
+    if (failed) {
+      const dismiss = el("button", { type: "button", className: "dismiss", textContent: "Dismiss" });
+      dismiss.addEventListener("click", async () => {
+        await fetch(`api/sessions/${encodeURIComponent(session.name)}`, { method: "DELETE" });
+        refresh();
+      });
+      parts.push(dismiss);
+    }
+    return el("div", { className: "cell" }, ...parts);
+  }
+
+  function nextName() {
+    for (let i = 1; ; i++) if (!tiles.has(`emulator-${i}`)) return `emulator-${i}`;
+  }
+
+  function addCell() {
+    if (!adding) {
+      const button = el("button", { type: "button", className: "tile add", title: "Start another emulator" },
+        el("div", { className: "device" }, el("div", { className: "screen", textContent: "+" })),
+        el("div", { className: "badge" }, el("span", { className: "name", textContent: "New emulator" })));
+      button.addEventListener("click", () => { adding = { name: nextName() }; render(lastSessions); });
+      return el("div", { className: "cell" }, button);
+    }
+    const name = el("input", { name: "name", value: adding.name, required: true, pattern: "[A-Za-z0-9_-]{1,100}", autocomplete: "off", spellcheck: false });
+    const fields = [el("label", {}, "Name", name)];
+    const select = (label, key, values, value) => {
+      const node = el("select", { name: key }, ...values.map(v => el("option", { value: v, textContent: key === "android" ? `Android ${v.replace(/\.0$/, "")}` : v.replace(/^Samsung /, ""), selected: v === value })));
+      fields.push(el("label", {}, label, node));
+    };
+    if (choices.devices?.length) select("Device", "device", choices.devices, "Samsung Galaxy S10");
+    if (choices.android?.length) select("Android", "android", choices.android, "16.0");
+    const error = el("p", { className: "error", hidden: true });
+    const cancel = el("button", { type: "button", textContent: "Cancel" });
+    cancel.addEventListener("click", () => { adding = null; render(lastSessions); });
+    const form = el("form", { className: "new" }, ...fields, error,
+      el("div", { className: "actions" }, cancel, el("button", { type: "submit", textContent: "Start" })));
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const body = Object.fromEntries(new FormData(form));
+      const r = await fetch("api/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const reply = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        error.textContent = reply.error || r.statusText;
+        error.hidden = false;
+        return;
+      }
+      adding = null;
+      refresh();
+    });
+    name.addEventListener("input", () => { adding.name = name.value; });
+    queueMicrotask(() => name.focus());
+    return el("div", { className: "cell" }, form);
+  }
+
   function addTile(session) {
     const img = el("img", { alt: `${session.name} screen` });
     const note = el("div", { className: "note", textContent: "Connecting…" });
@@ -214,35 +383,42 @@
       el("div", { className: "device" }, screen),
       el("div", { className: "badge" }, el("span", { className: "name", textContent: session.name }), state),
       meta);
-    const tile = { name: session.name, path: session.path, link, img, note, screen, state, visible: true };
+    const urls = urlList(session.urls || {});
+    const cell = el("div", { className: "cell" }, link, urls);
+    const tile = { name: session.name, path: session.path, link, cell, urls, img, note, screen, state, visible: true };
     tiles.set(session.name, tile);
     seen.observe(link);
     pump(tile);
     return tile;
   }
 
+  let lastSessions = [];
+
   function render(sessions) {
-    const names = new Set(sessions.map(s => s.name));
+    lastSessions = sessions;
+    const running = sessions.filter(s => s.state === "running");
+    const names = new Set(running.map(s => s.name));
     for (const [name, tile] of tiles) {
       if (!names.has(name)) {
         seen.unobserve(tile.link);
-        tile.link.remove();
+        tile.cell.remove();
         tiles.delete(name);
       }
     }
-    grid.replaceChildren(...sessions.map(s => (tiles.get(s.name) ?? addTile(s)).link));
-    if (!sessions.length) {
-      grid.append(el("div", { className: "empty" },
-        el("div", { textContent: "No running emulators." }), el("br"),
-        el("code", { textContent: "npx serve-droid start --name NAME" })));
-    }
+    // Keep the form and open URL lists in place across polls.
+    const form = grid.querySelector("form.new")?.closest(".cell");
+    grid.replaceChildren(...sessions.map(s => s.state === "running" ? (tiles.get(s.name) ?? addTile(s)).cell : pendingTile(s)),
+      adding && form ? form : addCell());
   }
 
   async function refresh() {
     try {
       const r = await fetch("api/sessions", { cache: "no-store" });
       const body = await r.json();
-      if (r.ok) render(body.sessions);
+      if (r.ok) {
+        choices = body.choices || {};
+        render(body.sessions);
+      }
     } catch {
       // Keep the last list; the next poll retries.
     }

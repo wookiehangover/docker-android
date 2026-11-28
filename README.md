@@ -64,15 +64,32 @@ npx serve-droid
 
 1. **First run on Linux:** the CLI builds the emulator image. This takes several minutes and needs network access. All projects share the image after that.
 2. **Boot:** a headless Samsung Galaxy S10 with Android 16 starts. Progress goes to stderr. Booting usually takes under a minute.
-3. **URL:** when Android and the UI are ready, the CLI prints the URL to stdout and exits. The emulator keeps running.
+3. **URLs:** when Android and the UI are ready, the CLI prints its URLs and exits. The emulator keeps running.
 4. **Next run:** the CLI finds the same emulator (it uses the Git root to identify the project) and prints its URL right away. After an update that changes the image, it rebuilds the image once and moves the emulator onto it, keeping apps and data.
 5. **`stop`:** shuts the emulator down and keeps its apps and data. **`rm`** deletes them.
 
-Only the URL goes to stdout, so you can use the command in scripts:
+In a terminal you get every URL:
+
+```
+  serve-droid v0.6.0
+
+  ▸ my-app-3f9a1c2b7e  Samsung Galaxy S10 · Android 16
+    Preview  http://127.0.0.1:49153/
+    Stream   http://127.0.0.1:49153/stream.mjpeg  (MJPEG)
+    Video    http://127.0.0.1:49153/stream.h264  (H.264, ffplay -f h264)
+    WS       ws://127.0.0.1:49153/ws  (JSON input; ?video=none for input only)
+    MCP      npx serve-droid mcp --name my-app-3f9a1c2b7e
+
+  Stop with: npx serve-droid stop
+```
+
+In a script, stdout is only the preview URL, so this still works:
 
 ```sh
 open "$(npx serve-droid)"
 ```
+
+`--json` prints every URL as JSON, for `start` and `ls`. See [Stream and WebSocket URLs](./packages/serve-droid/README.md#stream-and-websocket-urls) for the formats.
 
 On macOS and Windows, the CLI uses a running emulator or boots an existing AVD. If there's none, it creates one. The first run asks before it installs anything. See the [CLI guide](./packages/serve-droid/README.md#native-emulators-on-macos-and-windows).
 
@@ -196,6 +213,9 @@ Add `?codec=jpeg` or `?codec=h264` to the URL to choose. `WEB_UI_H264_BITRATE` s
 
 `serve-droid hub` serves one page with a live tile for every running emulator. Click a tile to open that emulator's full UI. Each emulator is proxied under `/d/<name>/`, so one port and one `tailscale serve` cover all of them, and WebMCP works on each.
 
+- **URLs:** each tile's **URLs** list has its stream, video and WebSocket URLs through the hub. Click a row to copy it. `serve-droid hub` prints them too.
+- **New emulator:** the last tile starts another emulator with a name, device and Android version. It runs `serve-droid start` and shows its progress on the tile. Native emulators on macOS and Windows take a name only.
+
 ```sh
 npx serve-droid --name phone
 npx serve-droid --name tablet --device "Pixel C"
@@ -203,9 +223,9 @@ npx serve-droid hub --token          # default port 6089
 tailscale serve --bg 6089
 ```
 
-| Desktop | Phone |
-|---|---|
-| ![Hub with two emulators](./images/hub-desktop.png) | ![Hub at phone width](./images/hub-phone.png) |
+| Desktop | New emulator | Phone |
+|---|---|---|
+| ![Hub with the URLs list open](./images/hub-desktop.png) | ![Starting a new emulator from the hub](./images/hub-new.png) | ![Hub at phone width](./images/hub-phone.png) |
 
 The hub adds each emulator's own token for you. Anyone who can reach the hub can use every emulator behind it, so use `--token` when others can reach it.
 

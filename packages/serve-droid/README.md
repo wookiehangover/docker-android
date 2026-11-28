@@ -22,7 +22,10 @@ npx serve-droid tap --text Settings     # drive the running emulator
 
 The default is a headless Samsung Galaxy S10 running Android 16. Docker picks
 a free loopback port. Progress goes to stderr. Once Android and the browser UI
-are ready, stdout contains the URL. Open it in a browser on the Docker host.
+are ready, a terminal shows every URL (preview, MJPEG stream, H.264 video,
+WebSocket and the MCP command). When stdout is not a terminal it is only the
+preview URL, and `--json` prints them all as JSON. Open the preview in a
+browser on the Docker host.
 
 To open the UI from another device, bind to the Docker host's LAN address,
 for example `serve-droid start --host 192.168.1.42 --port 6090`, then open
@@ -160,6 +163,35 @@ sets an HttpOnly, SameSite=Strict cookie. Other clients send
 `Authorization: Bearer <token>`. `ls` shows the URL with its token. Each
 Docker `start` makes a new token.
 
+### Stream and WebSocket URLs
+
+Every emulator serves these next to its preview. With a token, each takes
+`?token=` (players and `<img>` tags cannot send headers); `start` and `ls`
+print them with it.
+
+| URL | What it is |
+|---|---|
+| `/stream.mjpeg` | `multipart/x-mixed-replace` JPEG frames, sent when the screen changes. Works in `<img>`, `ffplay` and VLC. |
+| `/stream.h264` | H.264 Annex B from `screenrecord`. `ffplay -f h264 URL`. |
+| `/stream.avcc` | The same video as `[len:u32 BE][tag:u8][payload]` envelopes: `1` avcC decoder config, `2` keyframe, `3` delta frame, `4` JPEG still. Same framing as serve-sim and serve-avd. |
+| `/screenshot` | One PNG. |
+| `/ws` | The viewer socket. `?codec=h264` for H.264 frames, `?video=none` for input only. |
+
+`/ws` text messages are JSON. From the client:
+
+| Message | Meaning |
+|---|---|
+| `{"t":"touch","x":0.5,"y":0.8,"down":true,"id":0}` | Finger `id` (0–9) down or moved; `down:false` lifts it. `x`, `y` are 0–1 across the current orientation. |
+| `{"t":"wheel","x":0.5,"y":0.5,"dx":0,"dy":120}` | Scroll at a point, in CSS pixels. |
+| `{"t":"key","key":"GoBack"}` | A key by its browser `KeyboardEvent.key` name (`GoHome`, `GoBack`, `AppSwitch`, `Enter`…). |
+| `{"t":"text","text":"hello"}` | Type text. |
+| `{"t":"rotate"}` | Switch between portrait and landscape. |
+
+From the server: `{"t":"codec","codec":"jpeg"|"h264"|"none"}` first, then
+`{"t":"frame","w","h","rotation"}` before JPEG frames of a new size,
+`{"t":"clipboard","text"}` and `{"t":"event","event"}` (the event log).
+Binary messages are a JPEG per frame, or `[tag][payload]` for H.264.
+
 ### Hub
 
 `serve-droid hub [--host IP] [--port 6089] [--token]` lists every running
@@ -167,6 +199,13 @@ emulator as a live tile and proxies each one under `/d/<name>/`, so one port
 (and one `tailscale serve --bg 6089`) covers all of them. The hub adds each
 emulator's token itself; its own `--token` protects the hub. Anyone who can
 reach the hub can use every emulator behind it.
+
+Each tile lists the emulator's stream, video and WebSocket URLs through the
+hub (`/d/<name>/stream.mjpeg` and so on); with `--token` they carry the hub's
+`?token=`, which the hub removes before proxying. The last tile starts a new
+emulator: `POST /api/sessions {name, device?, android?}` runs `serve-droid
+start` and reports progress in `GET /api/sessions` until it is running.
+Requests from other sites are refused.
 
 ### Tests
 

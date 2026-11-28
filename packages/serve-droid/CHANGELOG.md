@@ -11,6 +11,9 @@
 - **Node client and middleware**: `serve-droid/client` (typed) and `serve-droid/middleware` (mount the UI under your dev server).
 - **Image updates**: `serve-droid start` rebuilds the emulator image when it is out of date for this serve-droid version and moves the existing emulator onto it, keeping its apps, data, port and token. `--image` skips this; `doctor` warns when the image is out of date.
 - **`serve-droid doctor`**: checks Docker, KVM, the Android SDK, Python and more, and prints a fix for each problem (`--json` for scripts).
+- **Stream and WebSocket URLs**: `/stream.mjpeg`, `/stream.h264` (Annex B, `ffplay -f h264`) and `/stream.avcc` (serve-sim/serve-avd framing), plus `/ws?video=none` for input-only clients. They take `?token=`.
+- **Hub URLs and new emulators**: each hub tile lists its stream, video and WebSocket URLs (click to copy), and a New emulator tile starts another emulator with a name, device and Android version, showing its progress.
+- **Clearer start output**: in a terminal, `start` and `ls` show every URL and the MCP command; scripts still get only the URL. `--json` prints them all.
 - **`serve-droid hub`**: every running emulator as a live tile on one page and one port, each proxied under `/d/<name>/`.
 - **Optional token**: `serve-droid start --token` (or `WEB_UI_TOKEN`) requires a token for the page, API and WebSocket.
 - **H.264 video** over WebCodecs, about 7× less bandwidth than JPEG on a scroll; JPEG stays as the fallback (`?codec=jpeg|h264`).
