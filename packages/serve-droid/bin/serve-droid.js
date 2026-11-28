@@ -444,9 +444,15 @@ async function main() {
     return;
   }
   if (command === 'hub') {
-    const { url } = await startHub({ host: values.host, port: values.port, token: values.token ? hubToken() : undefined });
-    console.error('Serving every running emulator. Stop with Ctrl-C.');
-    return console.log(url);
+    // Native emulators take only a name; Docker ones also a device and Android version.
+    const choices = native ? {} : { devices: [...profiles], android: [...apiLevels.keys()] };
+    const { url } = await startHub({ host: values.host, port: values.port, token: values.token ? hubToken() : undefined, choices });
+    if (!process.stdout.isTTY) return console.log(url);
+    const running = listSessions().filter(session => session.url);
+    const blocks = running.map(session => formatSession({ ...session, url: new URL(`d/${session.name}/${new URL(url).search}`, url).href }));
+    console.log([`\n  ${'serve-droid hub'}  ${url}\n`, ...blocks,
+      `\n  Start more from the page. Stop with Ctrl-C.\n`].join('\n'));
+    return;
   }
   if (command === 'logs') return showLogs(name, values.follow);
   if (command === 'rm') return remove(name, values.yes);

@@ -200,6 +200,13 @@ emulator as a live tile and proxies each one under `/d/<name>/`, so one port
 emulator's token itself; its own `--token` protects the hub. Anyone who can
 reach the hub can use every emulator behind it.
 
+Each tile lists the emulator's stream, video and WebSocket URLs through the
+hub (`/d/<name>/stream.mjpeg` and so on); with `--token` they carry the hub's
+`?token=`, which the hub removes before proxying. The last tile starts a new
+emulator: `POST /api/sessions {name, device?, android?}` runs `serve-droid
+start` and reports progress in `GET /api/sessions` until it is running.
+Requests from other sites are refused.
+
 ### Tests
 
 ```sh
