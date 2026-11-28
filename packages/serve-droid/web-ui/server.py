@@ -453,6 +453,9 @@ def token_matches(value) -> bool:
     return bool(value) and hmac.compare_digest(value.encode(), WEB_UI_TOKEN.encode())
 
 
+MEDIA_PATHS = {"/ws", "/stream.mjpeg", "/stream.h264", "/stream.avcc", "/screenshot"}
+
+
 @web.middleware
 async def require_token(request: web.Request, handler):
     """With WEB_UI_TOKEN set, every request needs the bearer header or the cookie set by `/?token=`."""
@@ -461,6 +464,9 @@ async def require_token(request: web.Request, handler):
     header = request.headers.get("Authorization", "")
     if token_matches(header[7:] if header.startswith("Bearer ") else "") \
             or token_matches(request.cookies.get(TOKEN_COOKIE)):
+        return await handler(request)
+    # Players and <img> tags cannot send headers, so the media URLs also take ?token=.
+    if request.method == "GET" and request.path in MEDIA_PATHS and token_matches(request.query.get("token")):
         return await handler(request)
     if request.method == "GET" and request.path == "/" and token_matches(request.query.get("token")):
         response = web.Response(status=302, headers={"Location": "./", "Cache-Control": "no-store"})
@@ -1167,6 +1173,7 @@ async def seed_jpeg(emu: Emulator) -> bytes:
 
 async def socket(request: web.Request) -> web.WebSocketResponse:
     """Viewer socket. `?codec=h264` asks for H.264 (video.py); else, or when it is unavailable, JPEG frames.
+    `?video=none` sends no frames: an input-only socket for touches, keys and text (protocol in the CLI README).
 
     The first message says which: `{t:"codec", codec:"h264"|"jpeg"}`. It can switch to jpeg later if
     screenrecord fails. Binary messages are a JPEG per frame, or `[tag][payload]` for H.264.
@@ -1179,6 +1186,7 @@ async def socket(request: web.Request) -> web.WebSocketResponse:
     emu.sockets.add(ws)
     gestures, wheel = GestureRecorder(emu), Wheel(emu)
     h264 = request.query.get("codec") == "h264" and emu.video.available()
+    input_only = request.query.get("video") == "none"
 
     async def send_frames():
         emu.jpeg_viewers.add(ws)
@@ -1215,7 +1223,10 @@ async def socket(request: web.Request) -> web.WebSocketResponse:
             await send_frames()
 
     try:
-        sender = asyncio.create_task(send_video() if h264 else send_frames())
+        if input_only:
+            sender = asyncio.create_task(ws.send_str(json.dumps({"t": "codec", "codec": "none"})))
+        else:
+            sender = asyncio.create_task(send_video() if h264 else send_frames())
         if emu.clipboard is not None:
             await ws.send_str(json.dumps({"t": "clipboard", "text": emu.clipboard}))
         async for msg in ws:
@@ -1254,6 +1265,71 @@ async def socket(request: web.Request) -> web.WebSocketResponse:
         sender.cancel()
         wheel.cancel()
     return ws
+
+
+async def stream_mjpeg(request: web.Request) -> web.StreamResponse:
+    """multipart/x-mixed-replace JPEG frames, for an <img> tag, ffplay or VLC. Sent only when the screen changes."""
+    emu: Emulator = request.app["emu"]
+    response = web.StreamResponse(headers={"Content-Type": "multipart/x-mixed-replace; boundary=frame",
+                                           "Cache-Control": "no-store"})
+    await response.prepare(request)
+    viewer = object()
+    emu.jpeg_viewers.add(viewer)
+    emu.viewers_changed()
+    try:
+        seq = -1
+        while True:
+            async with emu.frame_ready:
+                await emu.frame_ready.wait_for(lambda: emu.frame_seq != seq and emu.frame_full)
+                seq = emu.frame_seq
+            jpeg = (await emu.viewer_frame())[0]
+            await response.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpeg)
+                                 + jpeg + b"\r\n")
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass
+    finally:
+        emu.jpeg_viewers.discard(viewer)
+        emu.viewers_changed()
+    return response
+
+
+async def stream_video(request: web.Request) -> web.StreamResponse:
+    """H.264 from screenrecord over plain HTTP.
+
+    /stream.h264 is Annex B, playable with `ffplay -f h264 URL`. /stream.avcc is `[len:u32][tag:u8][payload]`
+    envelopes (1 avcC config, 2 keyframe, 3 delta, 4 JPEG seed), the same framing as serve-sim and serve-avd.
+    """
+    emu: Emulator = request.app["emu"]
+    if not emu.video.available():
+        raise web.HTTPServiceUnavailable(text=f"H.264 video is unavailable: {emu.video.unavailable or 'adb is missing'}")
+    annexb = request.path.endswith(".h264")
+    response = web.StreamResponse(headers={
+        "Content-Type": "video/h264" if annexb else "application/octet-stream", "Cache-Control": "no-store"})
+    await response.prepare(request)
+    viewer = emu.video.subscribe()
+    try:
+        if not annexb and not viewer.replayed:
+            try:
+                seed = bytes([video.TAG_SEED]) + await seed_jpeg(emu)
+                await response.write(len(seed).to_bytes(4, "big") + seed)
+            except (grpc.aio.AioRpcError, RuntimeError, TypeError) as e:
+                logger.info(f"no seed frame: {e}")
+        while True:
+            message = await viewer.queue.get()
+            if message is None:
+                break
+            tag, payload = message[0], message[1:]
+            if not annexb:
+                await response.write(len(message).to_bytes(4, "big") + message)
+            elif tag == video.TAG_CONFIG:
+                await response.write(video.annexb_config(payload))
+            elif tag in (video.TAG_KEY, video.TAG_DELTA):
+                await response.write(video.annexb_frame(payload))
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass
+    finally:
+        emu.video.unsubscribe(viewer)
+    return response
 
 
 def device_control_routes() -> list:
@@ -1300,6 +1376,8 @@ def main(metadata=None, wait_for_frame=False, serial=None) -> None:
         app.on_startup.append(ready)
     routes = {
         ("GET", "/"): index, ("GET", "/info"): info, ("GET", "/screenshot"): screenshot, ("GET", "/ws"): socket,
+        ("GET", "/stream.mjpeg"): stream_mjpeg, ("GET", "/stream.h264"): stream_video,
+        ("GET", "/stream.avcc"): stream_video,
         ("GET", "/tools.json"): tools_manifest, ("GET", "/logcat"): logcat_socket,
         ("GET", "/api/state"): get_state, ("GET", "/api/foreground"): get_foreground,
         ("GET", "/api/device-info"): get_device_info, ("GET", "/api/frame"): get_frame,

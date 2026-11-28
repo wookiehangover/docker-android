@@ -64,15 +64,32 @@ npx serve-droid
 
 1. **First run on Linux:** the CLI builds the emulator image. This takes several minutes and needs network access. All projects share the image after that.
 2. **Boot:** a headless Samsung Galaxy S10 with Android 16 starts. Progress goes to stderr. Booting usually takes under a minute.
-3. **URL:** when Android and the UI are ready, the CLI prints the URL to stdout and exits. The emulator keeps running.
+3. **URLs:** when Android and the UI are ready, the CLI prints its URLs and exits. The emulator keeps running.
 4. **Next run:** the CLI finds the same emulator (it uses the Git root to identify the project) and prints its URL right away. After an update that changes the image, it rebuilds the image once and moves the emulator onto it, keeping apps and data.
 5. **`stop`:** shuts the emulator down and keeps its apps and data. **`rm`** deletes them.
 
-Only the URL goes to stdout, so you can use the command in scripts:
+In a terminal you get every URL:
+
+```
+  serve-droid v0.6.0
+
+  ▸ my-app-3f9a1c2b7e  Samsung Galaxy S10 · Android 16
+    Preview  http://127.0.0.1:49153/
+    Stream   http://127.0.0.1:49153/stream.mjpeg  (MJPEG)
+    Video    http://127.0.0.1:49153/stream.h264  (H.264, ffplay -f h264)
+    WS       ws://127.0.0.1:49153/ws  (JSON input; ?video=none for input only)
+    MCP      npx serve-droid mcp --name my-app-3f9a1c2b7e
+
+  Stop with: npx serve-droid stop
+```
+
+In a script, stdout is only the preview URL, so this still works:
 
 ```sh
 open "$(npx serve-droid)"
 ```
+
+`--json` prints every URL as JSON, for `start` and `ls`. See [Stream and WebSocket URLs](./packages/serve-droid/README.md#stream-and-websocket-urls) for the formats.
 
 On macOS and Windows, the CLI uses a running emulator or boots an existing AVD. If there's none, it creates one. The first run asks before it installs anything. See the [CLI guide](./packages/serve-droid/README.md#native-emulators-on-macos-and-windows).
 

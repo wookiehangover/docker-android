@@ -50,6 +50,28 @@ def avcc_config(sps: bytes, pps: bytes) -> bytes:
             + b"\x01" + len(pps).to_bytes(2, "big") + pps)
 
 
+START_CODE = b"\x00\x00\x00\x01"
+
+
+def annexb_config(config: bytes) -> bytes:
+    """SPS and PPS from an avcC record (as built by avcc_config), each after a start code."""
+    sps_len = int.from_bytes(config[6:8], "big")
+    sps = config[8:8 + sps_len]
+    at = 8 + sps_len + 1
+    pps = config[at + 2:at + 2 + int.from_bytes(config[at:at + 2], "big")]
+    return START_CODE + sps + START_CODE + pps
+
+
+def annexb_frame(payload: bytes) -> bytes:
+    """4-byte length-prefixed NAL units to start-code-prefixed ones."""
+    out, at = bytearray(), 0
+    while at + 4 <= len(payload):
+        size = int.from_bytes(payload[at:at + 4], "big")
+        out += START_CODE + payload[at + 4:at + 4 + size]
+        at += 4 + size
+    return bytes(out)
+
+
 def codec_string(config: bytes) -> str:
     return "avc1.%02x%02x%02x" % (config[1], config[2], config[3])
 

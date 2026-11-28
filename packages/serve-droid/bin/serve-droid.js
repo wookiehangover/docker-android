@@ -14,6 +14,7 @@ import { containerToken, containerUrl, listSessions, native, owner, projectName,
 import { actionHelp, actionOptions, actionVerbs, runAction } from '../lib/actions.js';
 import { runMcp } from '../lib/mcp.js';
 import { hubToken, startHub } from '../lib/hub.js';
+import { formatSession, formatStart, sessionJson } from '../lib/banner.js';
 import { formatDoctor, runDoctor } from '../lib/doctor.js';
 
 const help = `Usage: serve-droid [start|stop|ls|logs|rm|attach|mcp|hub|doctor|ACTION] [options]
@@ -23,7 +24,7 @@ Stop shuts the emulator down and keeps its Android data for the next start.
 
   start (default)   Launch natively on macOS and Windows, or with Docker/KVM on Linux
   stop              Stop the project's emulator and browser UI
-  ls                List running emulators and their browser URLs
+  ls                List running emulators and their URLs (--json)
   logs              Show the emulator and browser UI logs (-f to follow)
   rm                Stop the emulator and delete its saved data (-y to skip the prompt)
   attach            Start or reuse a native Android emulator in the foreground
@@ -40,6 +41,7 @@ Stop shuts the emulator down and keeps its Android data for the next start.
   --apk FILE        Install an APK after boot
   --image IMAGE     Use a compatible Docker image instead of the default build
   --token           Require a token for the browser UI and API; the printed URL carries it
+  --json            Print every URL as JSON (start and ls)
   --url URL         Use a running serve-droid at this URL (mcp and actions; or set SERVE_DROID_URL)
   -h, --help        Show this help
 
@@ -196,20 +198,20 @@ function parseCommand() {
     if (Object.keys(values).some(key => key !== 'json')) throw new Error('doctor accepts only --json.');
     return { command, values };
   }
-  if (values.json) throw new Error(`--json does not apply to ${command}.`);
   if (command === 'ls') {
-    if (Object.keys(values).length) throw new Error('ls takes no options.');
-    return { command };
+    if (Object.keys(values).some(key => key !== 'json')) throw new Error('ls accepts only --json.');
+    return { command, values };
   }
+  if (values.json && command !== 'start') throw new Error(`--json does not apply to ${command}.`);
   if (command === 'attach' && Object.keys(values).some(key => !['serial', 'port'].includes(key))) {
     throw new Error('Native emulator startup accepts --serial and --port.');
   }
-  if (native && command === 'start' && Object.keys(values).some(key => !['serial', 'port', 'name', 'apk', 'token'].includes(key))) {
-    throw new Error('Native emulator startup accepts --serial, --port, --name, --apk and --token.');
+  if (native && command === 'start' && Object.keys(values).some(key => !['serial', 'port', 'name', 'apk', 'token', 'json'].includes(key))) {
+    throw new Error('Native emulator startup accepts --serial, --port, --name, --apk, --token and --json.');
   }
   if (!native && command !== 'attach' && values.serial !== undefined) throw new Error('--serial requires attach.');
   const only = { stop: ['name'], logs: ['name', 'follow'], rm: ['name', 'yes'], hub: ['host', 'port', 'token'] }[command];
-  const extra = Object.keys(values).filter(key => !(only ?? ['name', 'serial', 'port', 'device', 'android', 'host', 'apk', 'image', 'token']).includes(key));
+  const extra = Object.keys(values).filter(key => !(only ?? ['name', 'serial', 'port', 'device', 'android', 'host', 'apk', 'image', 'token', 'json']).includes(key));
   if (extra.length) throw new Error(`--${extra[0]} does not apply to ${command}.`);
   const name = values.name ?? projectName();
   checkName(name);
@@ -279,9 +281,13 @@ async function installApk(url, apk) {
   if (!response.ok) throw new Error(`APK install failed (${response.status}): ${await response.text()}`);
 }
 
-function printSessions() {
-  const rows = listSessions().map(session => [session.name, session.url ?? '-', session.device]);
-  if (!rows.length) return console.error('No running emulators.');
+function printSessions(json) {
+  const sessions = listSessions();
+  if (json) return console.log(JSON.stringify(sessions.map(sessionJson), null, 2));
+  if (!sessions.length) return console.error('No running emulators.');
+  // A terminal gets every URL; scripts keep the plain table.
+  if (process.stdout.isTTY) return console.log(`\n${sessions.map(formatSession).join('\n\n')}\n`);
+  const rows = sessions.map(session => [session.name, session.url ?? '-', session.device]);
   rows.unshift(['NAME', 'URL', 'DEVICE']);
   const widths = rows[0].map((_, i) => Math.max(...rows.map(row => String(row[i] ?? '').length)));
   for (const row of rows) console.log(row.map((cell, i) => String(cell ?? '').padEnd(widths[i])).join('  ').trimEnd());
@@ -412,7 +418,7 @@ async function startEmulator(name, values) {
 async function main() {
   const { command, name, values, args } = parseCommand();
   if (command === 'help') return console.log(help);
-  if (command === 'ls') return printSessions();
+  if (command === 'ls') return printSessions(values.json);
   if (command === 'doctor') {
     const report = runDoctor();
     console.log(values.json ? JSON.stringify(report, null, 2) : formatDoctor(report));
@@ -457,7 +463,11 @@ async function main() {
   const url = await startEmulator(name, values);
   if (!url) return;
   if (values.apk) await installApk(url, values.apk);
-  console.log(url);
+  // stdout stays just the URL for scripts (`open "$(npx serve-droid)"`); a terminal gets every URL.
+  if (!values.json && !process.stdout.isTTY) return console.log(url);
+  const listed = listSessions().find(entry => entry.name === name);
+  const session = { name, device: listed?.device, url, named: values.name !== undefined };
+  console.log(values.json ? JSON.stringify(sessionJson(session), null, 2) : formatStart(session, version));
 }
 
 main().catch(error => {
